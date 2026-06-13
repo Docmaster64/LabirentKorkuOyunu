@@ -1687,14 +1687,7 @@ function createPlayerAvatar(name, color = '#00ff66', faceBase64 = null) {
     visor.position.set(0, 1.35, -0.225); // front surface offset (radius of head is 0.22, placed slightly outside to prevent clipping)
     visor.rotation.y = Math.PI; // Face forward down negative Z axis
     group.add(visor);
-    
-    // Hoodie hood cover
-    const hoodGeo = new THREE.SphereGeometry(0.26, 12, 12, 0, Math.PI * 2, 0, Math.PI / 1.5);
-    const hoodMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.6, side: THREE.DoubleSide });
-    const hood = new THREE.Mesh(hoodGeo, hoodMat);
-    hood.position.y = 1.35;
-    hood.rotation.x = -0.55; // Tilt hood backward to fully expose the face/visor
-    group.add(hood);
+    // Hoodie hood cover removed to keep the face visor fully visible from all angles
     
     // floating Name Tag
     const canvas = document.createElement('canvas');
