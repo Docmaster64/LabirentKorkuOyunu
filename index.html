@@ -214,7 +214,7 @@
                     <div style="display: none;">
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <span>Zoom:</span>
-                            <input type="range" id="face-scale-slider" min="50" max="250" value="100" style="width: 90px; height: 8px;">
+                            <input type="range" id="face-scale-slider" min="30" max="800" value="100" style="width: 90px; height: 8px;">
                         </div>
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <span>Kaydır X:</span>
@@ -271,8 +271,9 @@
                 </div>
             </div>
             
-            <div class="lobby-actions" style="display: flex; gap: 15px;">
+            <div class="lobby-actions" style="display: flex; gap: 15px; flex-wrap: wrap; justify-content: center;">
                 <button id="lobby-start-btn" class="horror-btn win-btn pulse-glow hidden">OYUNU BAŞLAT</button>
+                <button id="lobby-monster-btn" class="horror-btn" style="background: #3a0007; border-color: #ff0022; color: #ff0022;">👾 CANAVAR OL</button>
                 <button id="lobby-leave-btn" class="horror-btn">LOBİDEN ÇIK</button>
             </div>
         </div>

@@ -17,6 +17,7 @@ let isMultiplayer = false;
 let isHost = false;
 let roomCode = '';
 let playerName = 'Oyuncu';
+let playerRole = 'survivor'; // 'survivor' or 'monster'
 let otherPlayers = {}; // Map of socketId -> { avatarGroup, name, isDead, position, targetPos }
 let isPlayerDead = false;
 let playerColor = '#00ff66';
@@ -46,6 +47,10 @@ let mouseSensitivity = 0.0022;
 let voiceMediaRecorder = null;
 let voiceStream = null;
 let isVoiceChatting = false;
+
+// Human Monster multiplayer mode state
+let isHumanMonsterActive = false;
+let monsterPlayerId = null;
 
 
 // Co-op Game Session settings
@@ -77,9 +82,9 @@ let playerStamina = 1.0; // 0.0 to 1.0
 let crystalsCollected = 0;
 let gameTime = 0;
 
-const walkSpeed = 2.5;
-const sprintSpeed = 4.2;
-const playerHeight = 1.6;
+let walkSpeed = 2.5;
+let sprintSpeed = 4.2;
+let playerHeight = 1.6;
 let isSprinting = false;
 
 // Input Management
@@ -555,6 +560,13 @@ function setupUIBindings() {
         }
     });
 
+    // Toggle Monster Role button listener
+    document.getElementById('lobby-monster-btn').addEventListener('click', () => {
+        if (socket) {
+            socket.emit('toggleRole', { roomCode });
+        }
+    });
+
     // Start Game from Lobby (Host only)
     document.getElementById('lobby-start-btn').addEventListener('click', () => {
         if (!isHost || !socket) return;
@@ -890,7 +902,34 @@ function tick(currentTime) {
         }
         
         // 3. Update AI Monster & Ambient Scares
-        if (!isMultiplayer || isHost) {
+        if (isHumanMonsterActive) {
+            if (playerRole === 'monster') {
+                if (socket) {
+                    socket.emit('updateMonster', {
+                        roomCode,
+                        position: camera.position,
+                        rotationY: playerYaw,
+                        state: 'chase',
+                        targetPoint: null,
+                        isDashingState: 'normal'
+                    });
+                }
+                
+                // Proximity catch survivors check
+                for (const pid in otherPlayers) {
+                    const surv = otherPlayers[pid];
+                    if (!surv.isDead) {
+                        const dist = camera.position.distanceTo(surv.avatarGroup.position);
+                        if (dist < 1.35) {
+                            socket.emit('playerCaught', { roomCode, playerId: pid });
+                        }
+                    }
+                }
+            } else {
+                monster.update(deltaTime, currentTime / 1000, monster.position, false, audioSystem, playerYaw);
+            }
+            audioSystem.updateAmbientScares(deltaTime, monster.position, camera.position, playerYaw);
+        } else if (!isMultiplayer || isHost) {
             // Host or Singleplayer updates AI
             let targetPos = camera.position;
             let targetSprinting = isSprinting && isMoving();
@@ -1355,6 +1394,27 @@ function initSocket() {
         updateLobbyPlayersList(players);
         updateTeamHUD();
     });
+
+    socket.on('rolesUpdated', ({ players }) => {
+        updateLobbyPlayersList(players);
+        if (players[socket.id]) {
+            playerRole = players[socket.id].role;
+            const btn = document.getElementById('lobby-monster-btn');
+            if (btn) {
+                if (playerRole === 'monster') {
+                    btn.innerText = "🏃 İNSAN OL";
+                    btn.style.background = "#007c40";
+                    btn.style.borderColor = "#00ff66";
+                    btn.style.color = "#00ff66";
+                } else {
+                    btn.innerText = "👾 CANAVAR OL";
+                    btn.style.background = "#3a0007";
+                    btn.style.borderColor = "#ff0022";
+                    btn.style.color = "#ff0022";
+                }
+            }
+        }
+    });
     
     socket.on('hostChanged', ({ hostId }) => {
         if (socket.id === hostId) {
@@ -1371,6 +1431,17 @@ function initSocket() {
         
         isPlayerDead = false;
         
+        // Check if there is a human monster in the room
+        isHumanMonsterActive = false;
+        monsterPlayerId = null;
+        for (const pid in players) {
+            if (players[pid].role === 'monster') {
+                isHumanMonsterActive = true;
+                monsterPlayerId = pid;
+                break;
+            }
+        }
+        
         // Rebuild level from host preset
         maze.destroy();
         monster.destroy();
@@ -1378,13 +1449,45 @@ function initSocket() {
         maze = new Maze(scene, THREE, { mazeGrid, items, batteries, chests });
         monster = new Monster(scene, THREE, maze);
         
-        // Reset player variables
-        playerPos.set(6, 1.6, 6);
+        // Spawn positions & roles setting
+        if (playerRole === 'monster') {
+            const mx = (maze.width - 1.5) * maze.cellSize;
+            const mz = (maze.height - 1.5) * maze.cellSize;
+            playerPos.set(mx, 2.1, mz);
+            playerHeight = 2.1;
+            walkSpeed = 3.2;
+            sprintSpeed = 5.0;
+            isFlashlightOn = false;
+            flashlight.visible = false;
+            
+            // Red night vision fog
+            scene.background = new THREE.Color(0x180306);
+            scene.fog.color = new THREE.Color(0x180306);
+            scene.fog.density = 0.22;
+            ambientLight.color.setHex(0xff0033);
+            ambientLight.intensity = 0.5; // bright enough to see
+            
+            // Hide the local AI monster model
+            monster.meshGroup.visible = false;
+        } else {
+            playerPos.set(6, 1.6, 6);
+            playerHeight = 1.6;
+            walkSpeed = 2.5;
+            sprintSpeed = 4.2;
+            isFlashlightOn = true;
+            flashlight.visible = true;
+            
+            // Normal horror settings
+            scene.background = new THREE.Color(0x020203);
+            scene.fog.color = new THREE.Color(0x020203);
+            scene.fog.density = 0.16;
+            ambientLight.color.setHex(0xffffff);
+            ambientLight.intensity = 0.03;
+        }
+        
         playerYaw = 0;
         playerPitch = 0;
         batteryLevel = 1.0;
-        isFlashlightOn = true;
-        flashlight.visible = true;
         playerStamina = 1.0;
         crystalsCollected = 0;
         gameTime = 0;
@@ -1618,6 +1721,7 @@ function setupOtherPlayersAvatars(players) {
         if (pid === socket.id) continue;
         
         const pData = players[pid];
+        if (pData.role === 'monster') continue;
         
         const avatarGroup = createPlayerAvatar(pData.name, pData.color, pData.face);
         otherPlayers[pid] = {
@@ -2118,6 +2222,10 @@ function playBase64Audio(base64Data) {
 
 // Paint tool functions
 let paintCanvas, paintCtx;
+let drawingCanvas = null;
+let drawingCtx = null;
+let lastPaintX = null;
+let lastPaintY = null;
 let isDrawingPaint = false;
 let brushColor = '#000000';
 let brushSize = 4;
@@ -2195,11 +2303,15 @@ function setupPaintEditor() {
     paintCanvas.addEventListener('mouseup', () => {
         isDrawingPaint = false;
         isDraggingImage = false;
+        lastPaintX = null;
+        lastPaintY = null;
     });
     
     paintCanvas.addEventListener('mouseleave', () => {
         isDrawingPaint = false;
         isDraggingImage = false;
+        lastPaintX = null;
+        lastPaintY = null;
     });
     
     paintCanvas.addEventListener('touchstart', (e) => {
@@ -2246,14 +2358,16 @@ function setupPaintEditor() {
     paintCanvas.addEventListener('touchend', () => {
         isDrawingPaint = false;
         isDraggingImage = false;
+        lastPaintX = null;
+        lastPaintY = null;
     });
 
     // Mouse wheel zoom on paint canvas
     paintCanvas.addEventListener('wheel', (e) => {
         if (uploadedImage) {
             e.preventDefault();
-            faceScale -= Math.sign(e.deltaY) * 8;
-            faceScale = Math.max(30, Math.min(300, faceScale));
+            faceScale -= Math.sign(e.deltaY) * 15; // faster zoom
+            faceScale = Math.max(30, Math.min(800, faceScale)); // zoom up to 800%
             
             document.getElementById('face-scale-slider').value = faceScale;
             redrawPaintCanvas();
@@ -2333,36 +2447,63 @@ function setupPaintEditor() {
 }
 
 function resetPaintCanvas() {
-    paintCtx.fillStyle = '#ffdbac';
-    paintCtx.fillRect(0, 0, 128, 128);
+    if (!drawingCanvas) {
+        drawingCanvas = document.createElement('canvas');
+        drawingCanvas.width = 128;
+        drawingCanvas.height = 128;
+        drawingCtx = drawingCanvas.getContext('2d');
+    }
     
-    paintCtx.fillStyle = '#000000';
-    paintCtx.fillRect(32, 40, 16, 16);
-    paintCtx.fillRect(80, 40, 16, 16);
-    paintCtx.fillStyle = '#ff3366';
-    paintCtx.fillRect(40, 84, 48, 12);
+    // Clear drawing layer
+    drawingCtx.clearRect(0, 0, 128, 128);
     
-    savePaintCanvasToFace();
+    // Draw initial smiley face onto the drawing canvas
+    drawingCtx.fillStyle = '#000000';
+    drawingCtx.fillRect(32, 40, 16, 16);
+    drawingCtx.fillRect(80, 40, 16, 16);
+    drawingCtx.fillStyle = '#ff3366';
+    drawingCtx.fillRect(40, 84, 48, 12);
+    
+    redrawPaintCanvas();
 }
 
 function drawOnPaintCanvas(e) {
+    if (!drawingCtx) return;
+    
     const rect = paintCanvas.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 128;
     const y = ((e.clientY - rect.top) / rect.height) * 128;
     
-    paintCtx.fillStyle = brushColor;
-    paintCtx.beginPath();
-    paintCtx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
-    paintCtx.fill();
+    drawingCtx.fillStyle = brushColor;
+    drawingCtx.strokeStyle = brushColor;
+    drawingCtx.lineWidth = brushSize;
+    drawingCtx.lineCap = 'round';
+    drawingCtx.lineJoin = 'round';
     
-    savePaintCanvasToFace();
+    drawingCtx.beginPath();
+    if (lastPaintX === null || lastPaintY === null) {
+        drawingCtx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
+        drawingCtx.fill();
+    } else {
+        drawingCtx.moveTo(lastPaintX, lastPaintY);
+        drawingCtx.lineTo(x, y);
+        drawingCtx.stroke();
+    }
+    
+    lastPaintX = x;
+    lastPaintY = y;
+    
+    redrawPaintCanvas();
 }
 
 function redrawPaintCanvas() {
     paintCtx.clearRect(0, 0, 128, 128);
+    
+    // 1. Draw base skin color background
     paintCtx.fillStyle = '#ffdbac';
     paintCtx.fillRect(0, 0, 128, 128);
     
+    // 2. Draw uploaded image with zoom and offset
     if (uploadedImage) {
         const scale = faceScale / 100.0;
         const w = 128 * scale;
@@ -2370,6 +2511,11 @@ function redrawPaintCanvas() {
         const x = (128 - w) / 2 + faceOffsetX;
         const y = (128 - h) / 2 + faceOffsetY;
         paintCtx.drawImage(uploadedImage, x, y, w, h);
+    }
+    
+    // 3. Draw drawing layer on top
+    if (drawingCanvas) {
+        paintCtx.drawImage(drawingCanvas, 0, 0);
     }
     
     savePaintCanvasToFace();

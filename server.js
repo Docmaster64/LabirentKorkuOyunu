@@ -49,7 +49,8 @@ io.on('connection', (socket) => {
             color: playerColor || '#00ff66',
             face: playerFace || null,
             deathSound: playerDeathSound || null,
-            victorySound: playerVictorySound || null
+            victorySound: playerVictorySound || null,
+            role: 'survivor'
         };
         
         socket.join(roomCode);
@@ -93,13 +94,36 @@ io.on('connection', (socket) => {
             color: playerColor || '#00ff66',
             face: playerFace || null,
             deathSound: playerDeathSound || null,
-            victorySound: playerVictorySound || null
+            victorySound: playerVictorySound || null,
+            role: 'survivor'
         };
         
         socket.join(code);
         socket.emit('roomJoined', { roomCode: code, players: room.players });
         socket.to(code).emit('playerJoined', { players: room.players, newPlayerId: socket.id });
         console.log(`Player ${socket.id} joined room ${code}`);
+    });
+
+    // 2b. Toggle Player Role (Survivor <-> Monster)
+    socket.on('toggleRole', ({ roomCode }) => {
+        const room = rooms[roomCode];
+        if (!room) return;
+        
+        const player = room.players[socket.id];
+        if (!player) return;
+        
+        if (player.role === 'monster') {
+            player.role = 'survivor';
+        } else {
+            // Set all other players in this room to survivor
+            for (const pid in room.players) {
+                room.players[pid].role = 'survivor';
+            }
+            player.role = 'monster';
+        }
+        
+        io.to(roomCode).emit('rolesUpdated', { players: room.players });
+        console.log(`Roles updated in room ${roomCode}`);
     });
     
     // 3. Host Starts Game
@@ -148,10 +172,13 @@ io.on('connection', (socket) => {
         socket.to(roomCode).emit('playerUpdated', { playerId: socket.id, player });
     });
     
-    // 5. Host broadcasts Monster updates
+    // 5. Host or Monster Player broadcasts Monster updates
     socket.on('updateMonster', ({ roomCode, position, rotationY, state, targetPoint, isDashingState }) => {
         const room = rooms[roomCode];
-        if (!room || room.hostId !== socket.id) return;
+        if (!room) return;
+        const player = room.players[socket.id];
+        const isMonsterPlayer = player && player.role === 'monster';
+        if (room.hostId !== socket.id && !isMonsterPlayer) return;
         
         // Broadcast to clients in same room
         socket.to(roomCode).emit('monsterUpdated', {
