@@ -23,6 +23,24 @@ let playerColor = '#00ff66';
 let playerFaceBase64 = null;
 let flashPointLight = null;
 
+// Start Screen 3D Preview Engine Variables
+let previewScene = null;
+let previewCamera = null;
+let previewRenderer = null;
+let previewAvatarGroup = null;
+
+// Audio customization variables (Death / Victory)
+let deathAudioBase64 = null;
+let victoryAudioBase64 = null;
+let mediaRecorder = null;
+let audioChunks = [];
+let isRecordingAudio = false;
+let recordingTarget = ''; // 'death' or 'victory'
+
+// Spectator modes list
+let spectatorTargetList = [];
+let spectatorIndex = 0;
+
 // Co-op Game Session settings
 let totalCrystalsRequired = 8;
 
@@ -83,6 +101,8 @@ let lastTime = performance.now();
 window.onload = () => {
     detectDevice();
     initEngine();
+    initStartScreenPreview();
+    setupPaintEditor();
 };
 
 function detectDevice() {
@@ -411,7 +431,13 @@ function setupUIBindings() {
         audioSystem.init();
         initSocket();
         
-        socket.emit('createRoom', { playerName, playerColor, playerFace: playerFaceBase64 });
+        socket.emit('createRoom', { 
+            playerName, 
+            playerColor, 
+            playerFace: playerFaceBase64,
+            playerDeathSound: deathAudioBase64,
+            playerVictorySound: victoryAudioBase64
+        });
     });
 
     // Join Lobby Button
@@ -428,34 +454,74 @@ function setupUIBindings() {
         audioSystem.init();
         initSocket();
         
-        socket.emit('joinRoom', { roomCode: codeVal, playerName, playerColor, playerFace: playerFaceBase64 });
+        socket.emit('joinRoom', { 
+            roomCode: codeVal, 
+            playerName, 
+            playerColor, 
+            playerFace: playerFaceBase64,
+            playerDeathSound: deathAudioBase64,
+            playerVictorySound: victoryAudioBase64
+        });
     });
 
     // Color Picker input listener
     document.getElementById('player-color-picker').addEventListener('input', (e) => {
         playerColor = e.target.value;
+        updatePreviewAvatar();
     });
 
-    // Face Image File selector listener (compresses image to 128x128 to keep socket data payload tiny)
-    document.getElementById('player-face-input').addEventListener('change', (e) => {
+    // File inputs for custom audio uploads
+    document.getElementById('upload-death-btn').addEventListener('click', () => {
+        document.getElementById('file-death-input').click();
+    });
+    document.getElementById('file-death-input').addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (file) {
             const reader = new FileReader();
-            reader.onload = (event) => {
-                const img = new Image();
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = 128;
-                    canvas.height = 128;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, 128, 128);
-                    playerFaceBase64 = canvas.toDataURL('image/png');
-                    document.getElementById('face-file-name').innerText = file.name;
-                    showNotification("Yüz Resmi Yüklendi!");
-                };
-                img.src = event.target.result;
+            reader.onload = event => {
+                deathAudioBase64 = event.target.result;
+                document.getElementById('death-sound-status').innerText = `📁 ${file.name.substring(0, 15)}...`;
+                document.getElementById('death-sound-status').style.color = '#00ff66';
+                showNotification("Ölüm Sesi Yüklendi!");
             };
             reader.readAsDataURL(file);
+        }
+    });
+
+    document.getElementById('upload-win-btn').addEventListener('click', () => {
+        document.getElementById('file-win-input').click();
+    });
+    document.getElementById('file-win-input').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = event => {
+                victoryAudioBase64 = event.target.result;
+                document.getElementById('win-sound-status').innerText = `📁 ${file.name.substring(0, 15)}...`;
+                document.getElementById('win-sound-status').style.color = '#00ff66';
+                showNotification("Kazanma Sesi Yüklendi!");
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+
+    // Mic recording actions
+    document.getElementById('record-death-btn').addEventListener('click', () => {
+        startRecordingAudio('death');
+    });
+    document.getElementById('record-win-btn').addEventListener('click', () => {
+        startRecordingAudio('win');
+    });
+
+    // Spectator Switcher buttons listeners
+    document.getElementById('spec-prev-btn').addEventListener('click', () => {
+        if (spectatorTargetList.length > 0) {
+            spectatorIndex = (spectatorIndex - 1 + spectatorTargetList.length) % spectatorTargetList.length;
+        }
+    });
+    document.getElementById('spec-next-btn').addEventListener('click', () => {
+        if (spectatorTargetList.length > 0) {
+            spectatorIndex = (spectatorIndex + 1) % spectatorTargetList.length;
         }
     });
 
@@ -492,6 +558,11 @@ function setupUIBindings() {
         isHost = false;
         document.getElementById('lobby-screen').classList.add('hidden');
         document.getElementById('start-screen').classList.remove('hidden');
+        
+        // Re-init preview
+        setTimeout(() => {
+            initStartScreenPreview();
+        }, 100);
     });
 
     // Game Over Restart
@@ -525,6 +596,7 @@ function startGame() {
     document.getElementById('start-screen').classList.add('hidden');
     document.getElementById('hud').classList.remove('hidden');
     document.getElementById('team-card').classList.add('hidden');
+    document.getElementById('spectator-hud').classList.add('hidden');
     
     isPlayerDead = false;
     invisibilityTimer = 0.0;
@@ -551,6 +623,7 @@ function restartGame() {
     document.getElementById('win-screen').classList.add('hidden');
     document.getElementById('hud').classList.remove('hidden');
     document.getElementById('team-card').classList.add('hidden');
+    document.getElementById('spectator-hud').classList.add('hidden');
     
     // Clear old level meshes
     maze.destroy();
@@ -627,6 +700,9 @@ function triggerJumpscare() {
     if (isMultiplayer) {
         socket.emit('playerCaught', { roomCode, playerId: socket.id });
     }
+    if (deathAudioBase64) {
+        playBase64Audio(deathAudioBase64);
+    }
     
     // Wait 2.2 seconds then show Game Over Menu or Spectate
     setTimeout(() => {
@@ -636,12 +712,14 @@ function triggerJumpscare() {
         if (isMultiplayer) {
             showNotification("KATLEDİLDİN! TAKIMINI İZLİYORSUN...");
             gameState = 'spectator';
+            document.getElementById('spectator-hud').classList.remove('hidden');
             // Disable pointer lock if they want
             if (document.pointerLockElement) {
                 document.exitPointerLock();
             }
         } else {
             document.getElementById('hud').classList.add('hidden');
+            document.getElementById('spectator-hud').classList.add('hidden');
             document.getElementById('game-over-screen').classList.remove('hidden');
             
             document.getElementById('end-crystals').innerText = `${crystalsCollected} / 8`;
@@ -659,9 +737,15 @@ function triggerJumpscare() {
 function triggerWin() {
     gameState = 'win';
     audioSystem.stopAllLoops();
-    audioSystem.playVictory();
+    
+    if (victoryAudioBase64) {
+        playBase64Audio(victoryAudioBase64);
+    } else {
+        audioSystem.playVictory();
+    }
     
     document.getElementById('hud').classList.add('hidden');
+    document.getElementById('spectator-hud').classList.add('hidden');
     document.getElementById('win-screen').classList.remove('hidden');
     document.getElementById('win-time').innerText = `${Math.floor(gameTime)} sn`;
     
@@ -715,16 +799,26 @@ function tick(currentTime) {
             updatePlayerPhysics(deltaTime);
             checkProximityInteractions();
         } else if (gameState === 'spectator') {
-            // Spectator mode: Follow closest alive player
-            let spectateTarget = null;
+            // Spectator mode: Switch between alive other players manually
+            spectatorTargetList = [];
             for (const pid in otherPlayers) {
                 if (!otherPlayers[pid].isDead) {
-                    spectateTarget = otherPlayers[pid].position;
-                    break;
+                    spectatorTargetList.push(pid);
                 }
             }
-            if (spectateTarget) {
-                camera.position.lerp(new THREE.Vector3(spectateTarget.x, playerHeight, spectateTarget.z), deltaTime * 5.0);
+            
+            if (spectatorTargetList.length > 0) {
+                if (spectatorIndex >= spectatorTargetList.length) {
+                    spectatorIndex = 0;
+                }
+                const targetPid = spectatorTargetList[spectatorIndex];
+                const spectateTarget = otherPlayers[targetPid];
+                if (spectateTarget) {
+                    camera.position.lerp(new THREE.Vector3(spectateTarget.position.x, playerHeight, spectateTarget.position.z), deltaTime * 5.0);
+                    document.getElementById('spec-player-name').innerText = spectateTarget.name;
+                }
+            } else {
+                document.getElementById('spec-player-name').innerText = "Herkes Elendi";
             }
         }
         
@@ -1231,6 +1325,7 @@ function initSocket() {
         document.getElementById('crystals-collected').innerText = '0';
         document.getElementById('battery-bar').style.width = '100%';
         document.getElementById('stamina-bar').style.width = '100%';
+        document.getElementById('spectator-hud').classList.add('hidden');
         
         // Reset skills UI and CD
         for (const key in skills) {
@@ -1357,6 +1452,11 @@ function initSocket() {
             pObj.isDead = true;
             pObj.avatarGroup.visible = false;
             updateTeamHUD();
+            
+            // Play custom death sound of caught player
+            if (pObj.deathSound) {
+                playBase64Audio(pObj.deathSound);
+            }
         }
         showNotification("BİR OYUNCU KATLEDİLDİ!");
     });
@@ -1434,7 +1534,9 @@ function setupOtherPlayersAvatars(players) {
             name: pData.name,
             isDead: pData.isDead,
             position: new THREE.Vector3(6, 1.6, 6),
-            targetPos: new THREE.Vector3(6, 1.6, 6)
+            targetPos: new THREE.Vector3(6, 1.6, 6),
+            deathSound: pData.deathSound,
+            victorySound: pData.victorySound
         };
     }
     
@@ -1453,10 +1555,15 @@ function createPlayerAvatar(name, color = '#00ff66', faceBase64 = null) {
     torso.receiveShadow = true;
     group.add(torso);
     
-    // Custom Cube Head covered in Hoodie with face mapped on the front
-    const skinMat = new THREE.MeshStandardMaterial({ color: 0xffdbac, roughness: 0.8 });
-    const hoodieMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.6 });
+    // Custom Spherical Head
+    const headGeo = new THREE.SphereGeometry(0.22, 16, 16);
+    const headMat = new THREE.MeshStandardMaterial({ color: 0xffdbac, roughness: 0.8 });
+    const head = new THREE.Mesh(headGeo, headMat);
+    head.position.y = 1.35;
+    head.castShadow = true;
+    group.add(head);
     
+    // Front Visor circular plate holding the face texture to avoid sphere distortion
     let faceMat;
     if (faceBase64) {
         const img = new Image();
@@ -1465,7 +1572,7 @@ function createPlayerAvatar(name, color = '#00ff66', faceBase64 = null) {
         img.onload = () => {
             faceTex.needsUpdate = true;
         };
-        faceMat = new THREE.MeshStandardMaterial({ map: faceTex, roughness: 0.6 });
+        faceMat = new THREE.MeshStandardMaterial({ map: faceTex, roughness: 0.6, transparent: true });
     } else {
         // Pixel smiley face fallback
         const canvas = document.createElement('canvas');
@@ -1481,23 +1588,14 @@ function createPlayerAvatar(name, color = '#00ff66', faceBase64 = null) {
         ctx.fillRect(20, 42, 24, 6);
         
         const faceTex = new THREE.CanvasTexture(canvas);
-        faceMat = new THREE.MeshStandardMaterial({ map: faceTex, roughness: 0.6 });
+        faceMat = new THREE.MeshStandardMaterial({ map: faceTex, roughness: 0.6, transparent: true });
     }
-    
-    const headMaterials = [
-        hoodieMat, // Right
-        hoodieMat, // Left
-        hoodieMat, // Top
-        skinMat,   // Bottom
-        faceMat,   // Front (Face!)
-        hoodieMat  // Back
-    ];
-    
-    const headGeo = new THREE.BoxGeometry(0.36, 0.36, 0.36);
-    const head = new THREE.Mesh(headGeo, headMaterials);
-    head.position.y = 1.35;
-    head.castShadow = true;
-    group.add(head);
+
+    const visorGeo = new THREE.CircleGeometry(0.12, 16);
+    const visor = new THREE.Mesh(visorGeo, faceMat);
+    visor.position.set(0, 1.35, -0.185); // front surface offset
+    visor.rotation.y = Math.PI; // Face forward down negative Z axis
+    group.add(visor);
     
     // Hoodie hood cover
     const hoodGeo = new THREE.SphereGeometry(0.26, 12, 12, 0, Math.PI * 2, 0, Math.PI / 1.5);
@@ -1755,6 +1853,7 @@ function triggerGameOver() {
     audioSystem.stopAllLoops();
     
     document.getElementById('hud').classList.add('hidden');
+    document.getElementById('spectator-hud').classList.add('hidden');
     document.getElementById('game-over-screen').classList.remove('hidden');
     document.getElementById('end-crystals').innerText = `${crystalsCollected} / 8`;
     document.getElementById('end-time').innerText = `${Math.floor(gameTime)} sn`;
@@ -1762,4 +1861,265 @@ function triggerGameOver() {
     if (document.pointerLockElement) {
         document.exitPointerLock();
     }
+}
+
+// 3D Start Screen Avatar Previews Engine
+function initStartScreenPreview() {
+    const container = document.getElementById('preview-3d-container');
+    if (!container) return;
+    
+    // Clear old preview renderer if exists
+    container.innerHTML = '';
+    
+    previewScene = new THREE.Scene();
+    previewScene.background = new THREE.Color(0x050102);
+    previewScene.fog = new THREE.FogExp2(0x050102, 0.22);
+    
+    previewCamera = new THREE.PerspectiveCamera(48, container.clientWidth / container.clientHeight, 0.1, 10);
+    previewCamera.position.set(0, 1.0, 1.95);
+    previewCamera.lookAt(0, 0.9, 0);
+    
+    previewRenderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    previewRenderer.setSize(container.clientWidth, container.clientHeight);
+    previewRenderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    previewRenderer.shadowMap.enabled = true;
+    container.appendChild(previewRenderer.domElement);
+    
+    const amb = new THREE.AmbientLight(0xffffff, 0.2);
+    previewScene.add(amb);
+    
+    const spot = new THREE.SpotLight(0xffffff, 2.5, 10.0, Math.PI / 5, 0.5, 1.0);
+    spot.position.set(1.0, 2.5, 1.5);
+    spot.castShadow = true;
+    previewScene.add(spot);
+
+    const redGlow = new THREE.PointLight(0xff0033, 1.8, 3.5);
+    redGlow.position.set(0, 0.1, 0);
+    previewScene.add(redGlow);
+    
+    updatePreviewAvatar();
+    
+    function animatePreview() {
+        if (gameState !== 'start') return;
+        requestAnimationFrame(animatePreview);
+        
+        if (previewAvatarGroup) {
+            previewAvatarGroup.rotation.y += 0.012;
+        }
+        previewRenderer.render(previewScene, previewCamera);
+    }
+    requestAnimationFrame(animatePreview);
+}
+
+function updatePreviewAvatar() {
+    if (!previewScene) return;
+    if (previewAvatarGroup) {
+        previewScene.remove(previewAvatarGroup);
+        previewAvatarGroup.traverse(child => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) child.material.dispose();
+        });
+    }
+    
+    previewAvatarGroup = createPlayerAvatar(playerName, playerColor, playerFaceBase64);
+    previewAvatarGroup.position.set(0, 0, 0);
+    previewScene.add(previewAvatarGroup);
+}
+
+// Media Recorder microphone capture (up to 3 seconds)
+function startRecordingAudio(target) {
+    if (isRecordingAudio) return;
+    
+    navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+            isRecordingAudio = true;
+            recordingTarget = target;
+            audioChunks = [];
+            
+            const btn = document.getElementById(`record-${target}-btn`);
+            btn.innerText = "🛑 Kaydediyor...";
+            btn.style.background = '#ff0033';
+            
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.ondataavailable = e => {
+                audioChunks.push(e.data);
+            };
+            mediaRecorder.onstop = () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                const reader = new FileReader();
+                reader.onload = event => {
+                    const base64 = event.target.result;
+                    if (recordingTarget === 'death') {
+                        deathAudioBase64 = base64;
+                        document.getElementById('death-sound-status').innerText = '🎙️ Mikrofon Kaydı Hazır (3sn)';
+                        document.getElementById('death-sound-status').style.color = '#00ff66';
+                    } else {
+                        victoryAudioBase64 = base64;
+                        document.getElementById('win-sound-status').innerText = '🎙️ Mikrofon Kaydı Hazır (3sn)';
+                        document.getElementById('win-sound-status').style.color = '#00ff66';
+                    }
+                    showNotification("Ses Kaydı Alındı!");
+                };
+                reader.readAsDataURL(audioBlob);
+                
+                btn.innerText = "🎙️ Kaydet";
+                btn.style.background = recordingTarget === 'death' ? '#7c0010' : '#007c40';
+                
+                stream.getTracks().forEach(track => track.stop());
+                isRecordingAudio = false;
+            };
+            
+            mediaRecorder.start();
+            
+            setTimeout(() => {
+                if (isRecordingAudio && mediaRecorder.state !== 'inactive') {
+                    mediaRecorder.stop();
+                }
+            }, 3000);
+        })
+        .catch(err => {
+            console.error("Mic access denied:", err);
+            alert("Mikrofon izni alınamadı!");
+        });
+}
+
+// Play custom audio Base64 string natively
+function playBase64Audio(base64Data) {
+    try {
+        const audio = new Audio(base64Data);
+        audio.volume = 1.0;
+        audio.play().catch(e => console.error("Error playing custom audio:", e));
+    } catch(e) {
+        console.error("Failed playing custom audio:", e);
+    }
+}
+
+// Paint tool functions
+let paintCanvas, paintCtx;
+let isDrawingPaint = false;
+let brushColor = '#000000';
+let brushSize = 4;
+let uploadedImage = null;
+let faceScale = 100;
+let faceOffsetX = 0;
+let faceOffsetY = 0;
+
+function setupPaintEditor() {
+    paintCanvas = document.getElementById('paint-canvas');
+    if (!paintCanvas) return;
+    paintCtx = paintCanvas.getContext('2d');
+    
+    resetPaintCanvas();
+    
+    paintCanvas.addEventListener('mousedown', (e) => { isDrawingPaint = true; drawOnPaintCanvas(e); });
+    paintCanvas.addEventListener('mousemove', (e) => { if (isDrawingPaint) drawOnPaintCanvas(e); });
+    paintCanvas.addEventListener('mouseup', () => isDrawingPaint = false);
+    paintCanvas.addEventListener('mouseleave', () => isDrawingPaint = false);
+    
+    paintCanvas.addEventListener('touchstart', (e) => { e.preventDefault(); isDrawingPaint = true; drawOnPaintCanvas(e.touches[0]); }, { passive: false });
+    paintCanvas.addEventListener('touchmove', (e) => { e.preventDefault(); if (isDrawingPaint) drawOnPaintCanvas(e.touches[0]); }, { passive: false });
+    paintCanvas.addEventListener('touchend', () => isDrawingPaint = false);
+
+    document.querySelectorAll('.brush-color').forEach(el => {
+        el.addEventListener('click', (e) => {
+            document.querySelectorAll('.brush-color').forEach(b => b.classList.remove('active'));
+            e.target.classList.add('active');
+            brushColor = e.target.dataset.color;
+        });
+    });
+    
+    document.getElementById('brush-size-slider').addEventListener('input', (e) => {
+        brushSize = parseInt(e.target.value);
+    });
+    
+    document.getElementById('clear-canvas-btn').addEventListener('click', () => {
+        uploadedImage = null;
+        resetPaintCanvas();
+    });
+    
+    document.getElementById('face-scale-slider').addEventListener('input', (e) => {
+        faceScale = parseInt(e.target.value);
+        redrawPaintCanvas();
+    });
+    document.getElementById('face-offset-x-slider').addEventListener('input', (e) => {
+        faceOffsetX = parseInt(e.target.value);
+        redrawPaintCanvas();
+    });
+    document.getElementById('face-offset-y-slider').addEventListener('input', (e) => {
+        faceOffsetY = parseInt(e.target.value);
+        redrawPaintCanvas();
+    });
+
+    // File input for custom player face
+    const faceInput = document.getElementById('player-face-input');
+    if (faceInput) {
+        faceInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = event => {
+                    uploadedImage = new Image();
+                    uploadedImage.onload = () => {
+                        redrawPaintCanvas();
+                    };
+                    uploadedImage.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+    }
+
+    // Name change update local preview
+    document.getElementById('player-name-input').addEventListener('input', (e) => {
+        playerName = e.target.value.trim() || "Oyuncu";
+        updatePreviewAvatar();
+    });
+}
+
+function resetPaintCanvas() {
+    paintCtx.fillStyle = '#ffdbac';
+    paintCtx.fillRect(0, 0, 128, 128);
+    
+    paintCtx.fillStyle = '#000000';
+    paintCtx.fillRect(32, 40, 16, 16);
+    paintCtx.fillRect(80, 40, 16, 16);
+    paintCtx.fillStyle = '#ff3366';
+    paintCtx.fillRect(40, 84, 48, 12);
+    
+    savePaintCanvasToFace();
+}
+
+function drawOnPaintCanvas(e) {
+    const rect = paintCanvas.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 128;
+    const y = ((e.clientY - rect.top) / rect.height) * 128;
+    
+    paintCtx.fillStyle = brushColor;
+    paintCtx.beginPath();
+    paintCtx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
+    paintCtx.fill();
+    
+    savePaintCanvasToFace();
+}
+
+function redrawPaintCanvas() {
+    paintCtx.clearRect(0, 0, 128, 128);
+    paintCtx.fillStyle = '#ffdbac';
+    paintCtx.fillRect(0, 0, 128, 128);
+    
+    if (uploadedImage) {
+        const scale = faceScale / 100.0;
+        const w = 128 * scale;
+        const h = 128 * scale;
+        const x = (128 - w) / 2 + faceOffsetX;
+        const y = (128 - h) / 2 + faceOffsetY;
+        paintCtx.drawImage(uploadedImage, x, y, w, h);
+    }
+    
+    savePaintCanvasToFace();
+}
+
+function savePaintCanvasToFace() {
+    playerFaceBase64 = paintCanvas.toDataURL('image/png');
+    updatePreviewAvatar();
 }

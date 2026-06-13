@@ -858,4 +858,18 @@ body, html {
     text-align: center;
 }
 
+/* Color Palette Buttons for Paint Brush */
+.brush-color {
+    transition: transform 0.1s ease;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+}
+.brush-color:hover {
+    transform: scale(1.15);
+}
+.brush-color.active {
+    border: 2px solid #ffffff !important;
+    transform: scale(1.2);
+    box-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+}
+
 

@@ -22,7 +22,7 @@ io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
     
     // 1. Create a Room
-    socket.on('createRoom', ({ playerName, playerColor, playerFace }) => {
+    socket.on('createRoom', ({ playerName, playerColor, playerFace, playerDeathSound, playerVictorySound }) => {
         const roomCode = Math.floor(1000 + Math.random() * 9000).toString();
         
         rooms[roomCode] = {
@@ -47,7 +47,9 @@ io.on('connection', (socket) => {
             activeSkill: null,
             isFlashlightOn: true,
             color: playerColor || '#00ff66',
-            face: playerFace || null
+            face: playerFace || null,
+            deathSound: playerDeathSound || null,
+            victorySound: playerVictorySound || null
         };
         
         socket.join(roomCode);
@@ -56,7 +58,7 @@ io.on('connection', (socket) => {
     });
     
     // 2. Join an existing Room
-    socket.on('joinRoom', ({ roomCode, playerName, playerColor, playerFace }) => {
+    socket.on('joinRoom', ({ roomCode, playerName, playerColor, playerFace, playerDeathSound, playerVictorySound }) => {
         const code = roomCode.trim();
         const room = rooms[code];
         
@@ -89,7 +91,9 @@ io.on('connection', (socket) => {
             activeSkill: null,
             isFlashlightOn: true,
             color: playerColor || '#00ff66',
-            face: playerFace || null
+            face: playerFace || null,
+            deathSound: playerDeathSound || null,
+            victorySound: playerVictorySound || null
         };
         
         socket.join(code);
