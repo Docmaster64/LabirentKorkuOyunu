@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Labirentteki Kabus - 3D Korku Oyunu</title>
+    
+    <!-- Outfit & Creepster Font from Google Fonts for horror aesthetic -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Creepster&family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="style.css">
+    
+    <!-- PWA Settings and Offline Support -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Kabus">
+    <link rel="apple-touch-icon" href="icon.png">
+    
+    <script>
+        if ('serviceWorker' in navigator) {
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                navigator.serviceWorker.getRegistrations().then(registrations => {
+                    for (let registration of registrations) {
+                        registration.unregister();
+                        console.log("Local development Service Worker unregistered to prevent caching.");
+                    }
+                });
+            } else {
+                window.addEventListener('load', () => {
+                    navigator.serviceWorker.register('sw.js')
+                        .then(reg => console.log('Service Worker registered!', reg))
+                        .catch(err => console.error('Service Worker registration failed:', err));
+                });
+            }
+        }
+    </script>
+</head>
+<body>
+    <!-- Red Proximity Vignette -->
+    <div id="proximity-vignette"></div>
+
+    <!-- 3D Render Canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- HUD Overlay during gameplay -->
+    <div id="hud" class="hidden">
+        <!-- Crystal Collector Status -->
+        <div class="hud-card" id="crystal-count-card">
+            <span class="icon">🩸</span> Kristaller: <span id="crystals-collected" class="highlight">0</span> / 8
+        </div>
+        
+        <!-- Battery Life Bar -->
+        <div class="hud-card" id="battery-card">
+            <span class="icon">🔋</span> El Feneri
+            <div class="bar-container">
+                <div id="battery-bar" class="bar green" style="width: 100%"></div>
+            </div>
+            <span id="battery-percent">100%</span>
+        </div>
+        
+        <!-- Sprint Stamina Bar -->
+        <div class="hud-card" id="stamina-card">
+            <span class="icon">🏃</span> Enerji
+            <div class="bar-container">
+                <div id="stamina-bar" class="bar cyan" style="width: 100%"></div>
+            </div>
+        </div>
+
+        <!-- Radar Scanner Widget -->
+        <div id="radar-widget">
+            <div class="radar-screen">
+                <div class="radar-sweep"></div>
+                <div class="radar-crosshair-h"></div>
+                <div class="radar-crosshair-v"></div>
+                <div class="radar-ring ring-1"></div>
+                <div class="radar-ring ring-2"></div>
+                <div class="radar-ping" id="radar-ping"></div>
+                <div class="radar-player-dot"></div>
+            </div>
+            <div class="radar-info">
+                <span class="radar-label">TEHLİKE RADARI</span>
+                <span class="radar-distance" id="radar-distance">-- m</span>
+            </div>
+        </div>
+        
+        <!-- In-game Notification (item picked up, etc.) -->
+        <div id="game-notification"></div>
+        
+        <!-- Crosshair for Pointer Lock -->
+        <div id="crosshair"></div>
+        
+        <!-- Keyboard controls indicator for desktop -->
+        <div id="desktop-controls-hint">
+            [F] Fener | [Shift] Koşma | [Q, E, R] Skiller
+        </div>
+        
+        <!-- Player Skills HUD -->
+        <div id="skills-card" class="hud-card">
+            <div class="skills-container">
+                <div class="skill-slot" id="skill-flash">
+                    <span class="key-hint">Q</span>
+                    <span class="icon">💥</span> Flash
+                    <div class="cooldown-overlay" id="cooldown-flash"></div>
+                </div>
+                <div class="skill-slot" id="skill-dash">
+                    <span class="key-hint">E</span>
+                    <span class="icon">⚡</span> Dash
+                    <div class="cooldown-overlay" id="cooldown-dash"></div>
+                </div>
+                <div class="skill-slot" id="skill-invisible">
+                    <span class="key-hint">R</span>
+                    <span class="icon">👤</span> Gizlen
+                    <div class="cooldown-overlay" id="cooldown-invisible"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Co-op Team List HUD -->
+        <div id="team-card" class="hud-card hidden">
+            <span class="icon">👥</span> Hayatta Kalanlar:
+            <div id="team-list"></div>
+        </div>
+    </div>
+
+    <!-- Main Start Screen -->
+    <div id="start-screen">
+        <div class="menu-container glassmorphism">
+            <h1 class="game-title glitch" data-text="LABİRENTTEKİ KABUS">LABİRENTTEKİ KABUS</h1>
+            <p class="tagline">Bu karanlık zindandan çıkış yok... Sadece kaçabilirsin.</p>
+            
+            <div class="instructions-card">
+                <h3>NASIL OYNANIR?</h3>
+                <p>Labirente dağılmış <strong>Kırmızı Kristalleri</strong> topla. Yaratık seni fark ederse çılgınca kaç! [Q, E, R] tuşlarıyla veya mobil butonlarla yeteneklerini kullan. Biten pilleri yerde arayarak fenerini şarj et.</p>
+                
+                <div class="controls-split">
+                    <div class="control-col">
+                        <h4>Masaüstü Kontrolleri</h4>
+                        <ul>
+                            <li><strong>WASD</strong>: Hareket Et</li>
+                            <li><strong>Fare</strong>: Etrafa Bak (Kilitlenir)</li>
+                            <li><strong>Shift</strong>: Koş | <strong>F</strong>: Fener</li>
+                            <li><strong>Q/E/R</strong>: Flashbang / Dash / Görünmezlik</li>
+                        </ul>
+                    </div>
+                    <div class="control-col border-left">
+                        <h4>Mobil Kontroller</h4>
+                        <ul>
+                            <li><strong>Sol Joystick</strong>: Yönlendir</li>
+                            <li><strong>Sağ Alan (Sürükleme)</strong>: Bakış</li>
+                            <li><strong>FLASH / DASH / GİZLEN</strong>: Ekran Butonları</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="warning-sound">🔊 Lütfen Kulaklık Takın (3D Ses Sentezi Aktif)</div>
+            
+            <div class="player-name-section" style="margin-bottom: 20px;">
+                <input type="text" id="player-name-input" placeholder="Adını Yaz..." maxlength="12" style="padding: 10px; background: rgba(0,0,0,0.6); color: #fff; border: 1px solid #ff0033; font-family: 'Outfit', sans-serif; font-size: 16px; border-radius: 4px; text-align: center; width: 200px;">
+            </div>
+            
+            <div class="menu-actions" style="display: flex; flex-direction: column; gap: 12px; align-items: center;">
+                <button id="start-single-btn" class="horror-btn pulse-glow">TEK BAŞINA OYNA</button>
+                <div class="multiplayer-actions" style="display: flex; gap: 10px;">
+                    <button id="host-lobby-btn" class="horror-btn" style="padding: 12px 20px; font-size: 16px;">ODA KUR</button>
+                    <div class="join-box" style="display: flex; background: rgba(0,0,0,0.5); border: 1px solid #555; border-radius: 4px; overflow: hidden;">
+                        <input type="text" id="room-code-input" placeholder="Oda Kodu..." maxlength="4" style="width: 90px; border: none; background: transparent; color: #fff; text-align: center; font-size: 16px; font-family: 'Outfit';">
+                        <button id="join-lobby-btn" class="horror-btn" style="border: none; padding: 12px 15px; font-size: 16px; border-radius: 0;">KATIL</button>
+                    </div>
+                </div>
+            </div>
+            <div class="credits" style="margin-top: 15px;">DeepMind Antigravity Pair Programming</div>
+        </div>
+    </div>
+
+    <!-- Multiplayer Lobby Screen -->
+    <div id="lobby-screen" class="hidden">
+        <div class="menu-container glassmorphism green-glow">
+            <h2 class="result-title win-text" style="font-family: 'Creepster', cursive; font-size: 48px; letter-spacing: 2px;">KABUS LOBİSİ</h2>
+            <p class="result-desc" style="font-size: 20px;">Oda Kodu: <span id="lobby-code-display" class="highlight-green" style="font-weight: 800; font-size: 26px; border: 1px dashed #00ff66; padding: 2px 10px; border-radius: 4px;">----</span></p>
+            
+            <div class="lobby-players-box" style="width: 100%; max-width: 380px; margin: 20px 0; background: rgba(0,0,0,0.6); padding: 15px; border-radius: 8px; border: 1px solid #222;">
+                <h3 style="margin-top: 0; color: #888; font-size: 16px; letter-spacing: 1px;">HAZIR OYUNCULAR:</h3>
+                <div id="lobby-players-list" style="display: flex; flex-direction: column; gap: 8px; text-align: left;">
+                    <!-- Dynamic player items here -->
+                </div>
+            </div>
+            
+            <div class="lobby-actions" style="display: flex; gap: 15px;">
+                <button id="lobby-start-btn" class="horror-btn win-btn pulse-glow hidden">OYUNU BAŞLAT</button>
+                <button id="lobby-leave-btn" class="horror-btn">LOBİDEN ÇIK</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Jumpscare Overlay Screen (Friend's photo displayed fullscreen) -->
+    <div id="jumpscare-overlay">
+        <img id="jumpscare-img" src="src/assets/jumpscare_pic.png" alt="KABUS">
+    </div>
+
+    <!-- Game Over Screen -->
+    <div id="game-over-screen" class="hidden">
+        <div class="menu-container glassmorphism red-alert">
+            <h2 class="result-title blood-text">YAKALANDIN!</h2>
+            <p class="result-desc">Yeşil kapüşonlu arkadaşının gölgesinden kaçamadın...</p>
+            
+            <div class="score-card">
+                <div class="score-row">
+                    <span>Toplanan Kristaller:</span>
+                    <span id="end-crystals" class="highlight-red">0 / 8</span>
+                </div>
+                <div class="score-row">
+                    <span>Hayatta Kalma Süresi:</span>
+                    <span id="end-time" class="highlight-red">0 sn</span>
+                </div>
+            </div>
+            
+            <button id="restart-btn" class="horror-btn pulse-glow">TEKRAR DENE</button>
+        </div>
+    </div>
+
+    <!-- Win / Survival Screen -->
+    <div id="win-screen" class="hidden">
+        <div class="menu-container glassmorphism green-glow">
+            <h2 class="result-title win-text">HAYATTA KALDIN!</h2>
+            <p class="result-desc">Bütün kristalleri toplayarak kabustan uyanmayı başardın!</p>
+            
+            <div class="score-card">
+                <div class="score-row">
+                    <span>Kayıp Kristaller:</span>
+                    <span class="highlight-green">8 / 8</span>
+                </div>
+                <div class="score-row">
+                    <span>Toplam Süre:</span>
+                    <span id="win-time" class="highlight-green">0 sn</span>
+                </div>
+            </div>
+            
+            <button id="win-restart-btn" class="horror-btn win-btn pulse-glow">YENİDEN OYNA</button>
+        </div>
+    </div>
+
+    <!-- Touch Joysticks Overlay for Mobile -->
+    <div id="mobile-controls" class="hidden">
+        <!-- Touch zone on the left for Joystick -->
+        <div id="joystick-zone">
+            <div id="joystick-base">
+                <div id="joystick-handle"></div>
+            </div>
+        </div>
+        
+        <!-- Touch buttons on the right for Action -->
+        <div id="mobile-buttons-zone">
+            <button id="mobile-btn-sprint" class="mobile-action-btn">🏃 Koş</button>
+            <button id="mobile-btn-flashlight" class="mobile-action-btn">🔦 Fener</button>
+            <button id="mobile-btn-flash" class="mobile-action-btn mobile-skill-btn">💥 Flash</button>
+            <button id="mobile-btn-dash" class="mobile-action-btn mobile-skill-btn">⚡ Dash</button>
+            <button id="mobile-btn-invisible" class="mobile-action-btn mobile-skill-btn">👤 Gizlen</button>
+        </div>
+    </div>
+
+    <script type="module" src="src/main.js"></script>
+</body>
+</html>
