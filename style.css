@@ -465,12 +465,12 @@ body, html {
     touch-action: none;
 }
 
-/* Right side: Action buttons */
 #mobile-buttons-zone {
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
+    display: grid;
+    grid-template-columns: repeat(3, 65px);
+    gap: 12px;
     pointer-events: auto;
+    margin-bottom: 15px;
 }
 
 .mobile-action-btn {

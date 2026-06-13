@@ -47,6 +47,9 @@
 
     <!-- HUD Overlay during gameplay -->
     <div id="hud" class="hidden">
+        <!-- Floating Pause Button for Mobile (Only shown on touch devices) -->
+        <button id="mobile-pause-btn" style="position: absolute; top: 20px; right: 20px; width: 44px; height: 44px; border-radius: 50%; background: rgba(10, 10, 12, 0.85); border: 2px solid #ff0033; color: #fff; font-size: 20px; display: none; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 0 10px rgba(255,0,51,0.4); z-index: 999; outline: none; pointer-events: auto;">⚙️</button>
+
         <!-- Crystal Collector Status -->
         <div class="hud-card" id="crystal-count-card">
             <span class="icon">🩸</span> Kristaller: <span id="crystals-collected" class="highlight">0</span> / 8
@@ -374,8 +377,9 @@
         
         <!-- Touch buttons on the right for Action -->
         <div id="mobile-buttons-zone">
-            <button id="mobile-btn-sprint" class="mobile-action-btn">🏃 Koş</button>
             <button id="mobile-btn-flashlight" class="mobile-action-btn">🔦 Fener</button>
+            <button id="mobile-btn-voice" class="mobile-action-btn" style="background: rgba(10, 10, 12, 0.75); border-color: #00ff66; color: #00ff66;">🎙️ Konuş</button>
+            <button id="mobile-btn-sprint" class="mobile-action-btn">🏃 Koş</button>
             <button id="mobile-btn-flash" class="mobile-action-btn mobile-skill-btn">💥 Flash</button>
             <button id="mobile-btn-dash" class="mobile-action-btn mobile-skill-btn">⚡ Dash</button>
             <button id="mobile-btn-invisible" class="mobile-action-btn mobile-skill-btn">👤 Gizlen</button>

@@ -86,6 +86,7 @@ let walkSpeed = 2.5;
 let sprintSpeed = 4.2;
 let playerHeight = 1.6;
 let isSprinting = false;
+let isMobileSprintingToggle = false;
 
 // Input Management
 const keys = { W: false, A: false, S: false, D: false, Shift: false };
@@ -122,6 +123,7 @@ function detectDevice() {
     if (isTouchDevice) {
         document.getElementById('mobile-controls').classList.remove('hidden');
         document.getElementById('desktop-controls-hint').style.display = 'none';
+        document.getElementById('mobile-pause-btn').style.display = 'flex';
         setupMobileControls();
     }
 }
@@ -408,11 +410,8 @@ function setupMobileControls() {
     const sprintBtn = document.getElementById('mobile-btn-sprint');
     sprintBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
-        keys.Shift = true;
-    });
-    sprintBtn.addEventListener('touchend', (e) => {
-        e.preventDefault();
-        keys.Shift = false;
+        isMobileSprintingToggle = !isMobileSprintingToggle;
+        keys.Shift = isMobileSprintingToggle;
     });
 
     const flashBtn = document.getElementById('mobile-btn-flashlight');
@@ -420,6 +419,34 @@ function setupMobileControls() {
         e.preventDefault();
         toggleFlashlight();
     });
+
+    // Mobile PTT voice button listener
+    const voiceBtn = document.getElementById('mobile-btn-voice');
+    if (voiceBtn) {
+        voiceBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (isMultiplayer) {
+                startVoiceTransmission();
+            }
+        });
+        const stopVoice = (e) => {
+            e.preventDefault();
+            if (isMultiplayer) {
+                stopVoiceTransmission();
+            }
+        };
+        voiceBtn.addEventListener('touchend', stopVoice);
+        voiceBtn.addEventListener('touchcancel', stopVoice);
+    }
+
+    // Floating Pause button listener
+    const mobilePauseBtn = document.getElementById('mobile-pause-btn');
+    if (mobilePauseBtn) {
+        mobilePauseBtn.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            showPauseMenu();
+        });
+    }
 
     // Mobile skill buttons
     document.getElementById('mobile-btn-flash').addEventListener('touchstart', (e) => {
@@ -1140,6 +1167,26 @@ function updatePlayerPhysics(deltaTime) {
         // Recover stamina when walking/resting
         const recoverySpeed = moving ? 0.08 : 0.14;
         playerStamina = Math.min(1.0, playerStamina + deltaTime * recoverySpeed);
+    }
+
+    // Update mobile sprint button visual state dynamically based on active sprinting state
+    if (isTouchDevice) {
+        const sprBtn = document.getElementById('mobile-btn-sprint');
+        if (sprBtn) {
+            if (isSprinting) {
+                sprBtn.style.background = '#007c40';
+                sprBtn.style.borderColor = '#00ff66';
+                sprBtn.style.boxShadow = '0 0 15px #00ff66';
+            } else {
+                sprBtn.style.background = 'rgba(10, 10, 12, 0.7)';
+                sprBtn.style.borderColor = 'rgba(255, 0, 34, 0.4)';
+                sprBtn.style.boxShadow = '0 4px 10px rgba(0,0,0,0.5)';
+                if (keys.Shift && playerStamina <= 0.05) {
+                    keys.Shift = false;
+                    isMobileSprintingToggle = false;
+                }
+            }
+        }
     }
     
     // Set movement speed
