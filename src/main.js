@@ -1684,7 +1684,7 @@ function createPlayerAvatar(name, color = '#00ff66', faceBase64 = null) {
 
     const visorGeo = new THREE.CircleGeometry(0.12, 16);
     const visor = new THREE.Mesh(visorGeo, faceMat);
-    visor.position.set(0, 1.35, -0.221); // front surface offset (radius of head is 0.22, placed slightly outside to prevent clipping)
+    visor.position.set(0, 1.35, -0.225); // front surface offset (radius of head is 0.22, placed slightly outside to prevent clipping)
     visor.rotation.y = Math.PI; // Face forward down negative Z axis
     group.add(visor);
     
@@ -1693,7 +1693,7 @@ function createPlayerAvatar(name, color = '#00ff66', faceBase64 = null) {
     const hoodMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.6, side: THREE.DoubleSide });
     const hood = new THREE.Mesh(hoodGeo, hoodMat);
     hood.position.y = 1.35;
-    hood.rotation.x = 0.2;
+    hood.rotation.x = -0.55; // Tilt hood backward to fully expose the face/visor
     group.add(hood);
     
     // floating Name Tag
