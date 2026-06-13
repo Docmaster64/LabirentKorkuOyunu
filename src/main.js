@@ -41,6 +41,13 @@ let recordingTarget = ''; // 'death' or 'victory'
 let spectatorTargetList = [];
 let spectatorIndex = 0;
 
+// Game Settings and Proximity Voice Chat variables
+let mouseSensitivity = 0.0022;
+let voiceMediaRecorder = null;
+let voiceStream = null;
+let isVoiceChatting = false;
+
+
 // Co-op Game Session settings
 let totalCrystalsRequired = 8;
 
@@ -188,13 +195,23 @@ function setupDesktopControls() {
     document.addEventListener('pointerlockchange', () => {
         // Paused state if pointer lock lost during play
         if (document.pointerLockElement !== canvas && gameState === 'play' && !isTouchDevice) {
-            // Option to show a menu or just mute sounds temporarily
+            showPauseMenu();
         }
     });
 
     window.addEventListener('keydown', (e) => {
         console.log("Tuşa basıldı:", e.key, "Kod:", e.code, "KeyCode:", e.keyCode, "Durum:", gameState);
         
+        // Handle Escape in both play and paused states
+        if (e.code === 'Escape' || e.keyCode === 27) {
+            if (gameState === 'play') {
+                showPauseMenu();
+            } else if (gameState === 'paused') {
+                resumeGame();
+            }
+            return;
+        }
+
         if (gameState !== 'play') return;
         
         const keyLower = e.key ? e.key.toLowerCase() : '';
@@ -230,6 +247,11 @@ function setupDesktopControls() {
             case 'KeyR':
                 triggerSkill('invisible');
                 break;
+            case 'KeyT':
+                if (isMultiplayer) {
+                    startVoiceTransmission();
+                }
+                break;
         }
     });
 
@@ -243,16 +265,24 @@ function setupDesktopControls() {
             case 'ShiftRight':
                 keys.Shift = false;
                 break;
+            case 'KeyT':
+                if (isMultiplayer) {
+                    stopVoiceTransmission();
+                }
+                break;
         }
+    });
+
+    window.addEventListener('blur', () => {
+        stopVoiceTransmission();
     });
 
     window.addEventListener('mousemove', (e) => {
         if (document.pointerLockElement !== canvas && !isTouchDevice) return;
         if (gameState !== 'play') return;
 
-        const sensitivity = 0.0022;
-        playerYaw -= e.movementX * sensitivity;
-        playerPitch -= e.movementY * sensitivity;
+        playerYaw -= e.movementX * mouseSensitivity;
+        playerPitch -= e.movementY * mouseSensitivity;
 
         // Clamp vertical look (pitch)
         playerPitch = Math.max(-Math.PI / 2.3, Math.min(Math.PI / 2.3, playerPitch));
@@ -589,6 +619,43 @@ function setupUIBindings() {
         } else {
             restartGame();
         }
+    });
+
+    // Pause / settings menu buttons
+    document.getElementById('resume-game-btn').addEventListener('click', resumeGame);
+    document.getElementById('settings-menu-btn').addEventListener('click', () => {
+        document.getElementById('settings-overlay').classList.remove('hidden');
+    });
+    document.getElementById('close-settings-btn').addEventListener('click', () => {
+        document.getElementById('settings-overlay').classList.add('hidden');
+    });
+    document.getElementById('return-lobby-btn').addEventListener('click', () => {
+        hidePauseMenu();
+        if (socket) {
+            socket.disconnect();
+            socket = null;
+        }
+        isMultiplayer = false;
+        isHost = false;
+        gameState = 'start';
+        document.getElementById('hud').classList.add('hidden');
+        document.getElementById('spectator-hud').classList.add('hidden');
+        document.getElementById('lobby-screen').classList.add('hidden');
+        document.getElementById('start-screen').classList.remove('hidden');
+        setTimeout(() => {
+            initStartScreenPreview();
+        }, 100);
+    });
+
+    // Sensitivity slider
+    document.getElementById('sensitivity-slider').addEventListener('input', (e) => {
+        mouseSensitivity = (parseInt(e.target.value) / 10.0) * 0.0022;
+    });
+
+    // Volume slider
+    document.getElementById('volume-slider').addEventListener('input', (e) => {
+        const vol = parseFloat(e.target.value) / 100.0;
+        audioSystem.setVolume(vol);
     });
 }
 
@@ -1464,6 +1531,30 @@ function initSocket() {
     socket.on('teamDefeated', () => {
         triggerGameOver();
     });
+
+    socket.on('voicePacket', ({ playerId, audio }) => {
+        const pObj = otherPlayers[playerId];
+        if (!pObj || pObj.isDead) return;
+        
+        // Proximity distance check
+        const dist = camera.position.distanceTo(pObj.avatarGroup.position);
+        const maxVoiceDistance = 25.0; // units/meters
+        if (dist > maxVoiceDistance) return;
+        
+        // Calculate volume scale based on proximity distance (linear rolloff)
+        const vol = Math.max(0.0, 1.0 - (dist / maxVoiceDistance));
+        
+        // Play audio chunk
+        try {
+            const playerAud = new Audio(audio);
+            const globalVol = parseFloat(document.getElementById('volume-slider').value) / 100.0;
+            const micGain = parseFloat(document.getElementById('mic-gain-slider').value) / 5.0; // standard gain multiplier
+            playerAud.volume = vol * globalVol * micGain;
+            playerAud.play().catch(e => {});
+        } catch(err) {
+            console.error("Error playing voice packet:", err);
+        }
+    });
     
     socket.on('errorMsg', (msg) => {
         alert(msg);
@@ -1593,7 +1684,7 @@ function createPlayerAvatar(name, color = '#00ff66', faceBase64 = null) {
 
     const visorGeo = new THREE.CircleGeometry(0.12, 16);
     const visor = new THREE.Mesh(visorGeo, faceMat);
-    visor.position.set(0, 1.35, -0.185); // front surface offset
+    visor.position.set(0, 1.35, -0.221); // front surface offset (radius of head is 0.22, placed slightly outside to prevent clipping)
     visor.rotation.y = Math.PI; // Face forward down negative Z axis
     group.add(visor);
     
@@ -2122,4 +2213,89 @@ function redrawPaintCanvas() {
 function savePaintCanvasToFace() {
     playerFaceBase64 = paintCanvas.toDataURL('image/png');
     updatePreviewAvatar();
+}
+
+// Pause Menu Overlay & Settings Panel
+function showPauseMenu() {
+    if (gameState !== 'play') return;
+    gameState = 'paused';
+    document.getElementById('pause-menu').classList.remove('hidden');
+    audioSystem.stopAllLoops();
+    if (document.pointerLockElement) {
+        document.exitPointerLock();
+    }
+}
+
+function hidePauseMenu() {
+    document.getElementById('pause-menu').classList.add('hidden');
+    document.getElementById('settings-overlay').classList.add('hidden');
+}
+
+function resumeGame() {
+    hidePauseMenu();
+    gameState = 'play';
+    if (!isTouchDevice) {
+        canvas.requestPointerLock();
+    }
+}
+
+// Proximity Voice Chat (PTT) functions
+function startVoiceTransmission() {
+    if (isVoiceChatting) return;
+    isVoiceChatting = true;
+    
+    let pttIndicator = document.getElementById('ptt-indicator');
+    if (!pttIndicator) {
+        pttIndicator = document.createElement('div');
+        pttIndicator.id = 'ptt-indicator';
+        pttIndicator.style.cssText = "position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(0, 255, 102, 0.25); border: 2px solid #00ff66; color: #00ff66; padding: 5px 15px; border-radius: 20px; font-weight: 800; font-size: 14px; text-shadow: 0 0 10px #00ff66; z-index: 9999; pointer-events: none;";
+        pttIndicator.innerText = "🎙️ MİKROFON AÇIK [T]";
+        document.body.appendChild(pttIndicator);
+    } else {
+        pttIndicator.style.display = 'block';
+    }
+    
+    navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+            voiceStream = stream;
+            voiceMediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+            
+            voiceMediaRecorder.ondataavailable = e => {
+                if (e.data && e.data.size > 0 && isVoiceChatting && socket) {
+                    const reader = new FileReader();
+                    reader.onload = event => {
+                        socket.emit('voicePacket', {
+                            roomCode,
+                            audio: event.target.result
+                        });
+                    };
+                    reader.readAsDataURL(e.data);
+                }
+            };
+            
+            voiceMediaRecorder.start(200); // Chunks every 200ms
+        })
+        .catch(err => {
+            console.error("PTT microphone access error:", err);
+            isVoiceChatting = false;
+            if (pttIndicator) pttIndicator.style.display = 'none';
+        });
+}
+
+function stopVoiceTransmission() {
+    if (!isVoiceChatting) return;
+    isVoiceChatting = false;
+    
+    const pttIndicator = document.getElementById('ptt-indicator');
+    if (pttIndicator) pttIndicator.style.display = 'none';
+    
+    if (voiceMediaRecorder && voiceMediaRecorder.state !== 'inactive') {
+        try {
+            voiceMediaRecorder.stop();
+        } catch(e) {}
+    }
+    if (voiceStream) {
+        voiceStream.getTracks().forEach(track => track.stop());
+        voiceStream = null;
+    }
 }

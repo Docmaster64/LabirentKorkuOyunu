@@ -322,6 +322,43 @@
         </div>
     </div>
 
+    <!-- In-Game Pause/Escape Menu Overlay -->
+    <div id="pause-menu" class="hidden">
+        <div class="menu-container glassmorphism" style="max-width: 400px; padding: 30px;">
+            <h2 class="result-title glitch" data-text="OYUN DURAKLATILDI" style="font-size: 2.2rem; color: #ff0033; text-shadow: 0 0 10px rgba(255,0,51,0.5);">OYUN DURAKLATILDI</h2>
+            
+            <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 20px;">
+                <button id="resume-game-btn" class="horror-btn pulse-glow" style="padding: 12px; font-size: 16px; width: 100%;">OYUNA DEVAM ET</button>
+                <button id="settings-menu-btn" class="horror-btn" style="padding: 10px; font-size: 15px; width: 100%;">AYARLAR</button>
+                <button id="return-lobby-btn" class="horror-btn" style="padding: 10px; font-size: 15px; background: #5a0010; border-color: #ff0033; width: 100%;">LOBİYE DÖN</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Settings Overlay -->
+    <div id="settings-overlay" class="hidden">
+        <div class="menu-container glassmorphism" style="max-width: 400px; padding: 25px; border-color: #00ff66;">
+            <h2 class="result-title win-text" style="font-size: 2rem; font-family: 'Creepster', cursive; margin: 0 0 10px 0;">AYARLAR</h2>
+            
+            <div style="display: flex; flex-direction: column; gap: 15px; margin-top: 15px; text-align: left; font-size: 14px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <span>Fare Hassasiyeti:</span>
+                    <input type="range" id="sensitivity-slider" min="1" max="20" value="10" style="width: 150px;">
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <span>Genel Ses Düzeyi:</span>
+                    <input type="range" id="volume-slider" min="0" max="100" value="80" style="width: 150px;">
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <span>Mikrofon Hassasiyeti:</span>
+                    <input type="range" id="mic-gain-slider" min="1" max="10" value="5" style="width: 150px;">
+                </div>
+            </div>
+            
+            <button id="close-settings-btn" class="horror-btn win-btn" style="margin-top: 25px; padding: 10px; font-size: 15px; width: 100%;">KAPAT</button>
+        </div>
+    </div>
+
     <!-- Touch Joysticks Overlay for Mobile -->
     <div id="mobile-controls" class="hidden">
         <!-- Touch zone on the left for Joystick -->

@@ -204,8 +204,13 @@ io.on('connection', (socket) => {
             console.log(`Team defeated in room ${roomCode}`);
         }
     });
+
+    // 9. Proximity Voice Chat routing
+    socket.on('voicePacket', ({ roomCode, audio }) => {
+        socket.to(roomCode).emit('voicePacket', { playerId: socket.id, audio });
+    });
     
-    // 9. Handle Disconnection
+    // 10. Handle Disconnection
     socket.on('disconnect', () => {
         console.log(`User disconnected: ${socket.id}`);
         

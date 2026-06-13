@@ -872,4 +872,21 @@ body, html {
     box-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
 }
 
+/* Pause and Settings Overlay Panels */
+#pause-menu, #settings-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 1000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: rgba(4, 4, 6, 0.88);
+    padding: 20px;
+    transition: opacity 0.3s ease;
+}
+
+
 
