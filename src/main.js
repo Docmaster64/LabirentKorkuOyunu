@@ -1983,13 +1983,46 @@ function initStartScreenPreview() {
     
     updatePreviewAvatar();
     
+    // Manual Drag-to-Rotate state
+    let isDraggingPreview = false;
+    let previousMouseX = 0;
+    
+    container.addEventListener('mousedown', (e) => {
+        isDraggingPreview = true;
+        previousMouseX = e.clientX;
+    });
+    
+    window.addEventListener('mousemove', (e) => {
+        if (!isDraggingPreview || !previewAvatarGroup) return;
+        const deltaX = e.clientX - previousMouseX;
+        previewAvatarGroup.rotation.y += deltaX * 0.015;
+        previousMouseX = e.clientX;
+    });
+    
+    window.addEventListener('mouseup', () => {
+        isDraggingPreview = false;
+    });
+    
+    // Touch support for drag-to-rotate
+    container.addEventListener('touchstart', (e) => {
+        isDraggingPreview = true;
+        previousMouseX = e.touches[0].clientX;
+    });
+    
+    window.addEventListener('touchmove', (e) => {
+        if (!isDraggingPreview || !previewAvatarGroup) return;
+        const deltaX = e.touches[0].clientX - previousMouseX;
+        previewAvatarGroup.rotation.y += deltaX * 0.015;
+        previousMouseX = e.touches[0].clientX;
+    });
+    
+    window.addEventListener('touchend', () => {
+        isDraggingPreview = false;
+    });
+    
     function animatePreview() {
         if (gameState !== 'start') return;
         requestAnimationFrame(animatePreview);
-        
-        if (previewAvatarGroup) {
-            previewAvatarGroup.rotation.y += 0.012;
-        }
         previewRenderer.render(previewScene, previewCamera);
     }
     requestAnimationFrame(animatePreview);
@@ -1997,7 +2030,11 @@ function initStartScreenPreview() {
 
 function updatePreviewAvatar() {
     if (!previewScene) return;
+    
+    // Preserve current rotation or start facing camera (Math.PI)
+    let currentRot = Math.PI;
     if (previewAvatarGroup) {
+        currentRot = previewAvatarGroup.rotation.y;
         previewScene.remove(previewAvatarGroup);
         previewAvatarGroup.traverse(child => {
             if (child.geometry) child.geometry.dispose();
@@ -2007,6 +2044,7 @@ function updatePreviewAvatar() {
     
     previewAvatarGroup = createPlayerAvatar(playerName, playerColor, playerFaceBase64);
     previewAvatarGroup.position.set(0, 0, 0);
+    previewAvatarGroup.rotation.y = currentRot; // Face camera initially, and preserve rotation when modified!
     previewScene.add(previewAvatarGroup);
 }
 
