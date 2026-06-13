@@ -16,6 +16,8 @@ export class Maze {
         this.allItems = []; // Keeps track of all spawned crystals for cleanup
         this.batteries = [];
         this.allBatteries = []; // Keeps track of all spawned batteries for cleanup
+        this.chests = [];
+        this.allChests = []; // Keeps track of all spawned chests for cleanup
         this.flickeringLights = [];
         
         // Procedural Textures
@@ -26,7 +28,7 @@ export class Maze {
         if (presetData) {
             this.grid = presetData.mazeGrid;
             this.buildMaze3D();
-            this.spawnPresetCollectibles(presetData.items, presetData.batteries);
+            this.spawnPresetCollectibles(presetData.items, presetData.batteries, presetData.chests || []);
         } else {
             // Generate grid array
             this.generateGrid();
@@ -366,9 +368,48 @@ export class Maze {
             this.batteries.push(batObj);
             this.allBatteries.push(batObj);
         }
+        
+        // 3. Spawn 3 Chests (Wood boxes containing random skills)
+        const chestCount = Math.min(3, pathCells.length);
+        for (let i = 0; i < chestCount; i++) {
+            const cell = pathCells.pop();
+            const cx = (cell.x + 0.5) * this.cellSize;
+            const cz = (cell.y + 0.5) * this.cellSize;
+            const cy = 0.25;
+            
+            const chestGroup = new THREE.Group();
+            const boxGeo = new THREE.BoxGeometry(0.6, 0.45, 0.5);
+            const boxMat = new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.8 });
+            const box = new THREE.Mesh(boxGeo, boxMat);
+            box.position.y = 0.225;
+            box.castShadow = true;
+            chestGroup.add(box);
+            
+            const lockGeo = new THREE.BoxGeometry(0.08, 0.12, 0.04);
+            const lockMat = new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: 0.3, metalness: 0.8 });
+            const lock = new THREE.Mesh(lockGeo, lockMat);
+            lock.position.set(0, 0.225, 0.26);
+            chestGroup.add(lock);
+            
+            chestGroup.position.set(cx, 0, cz);
+            this.scene.add(chestGroup);
+            
+            const chLight = new THREE.PointLight(0xffaa00, 0.5, 3.0);
+            chLight.position.set(cx, cy + 0.5, cz);
+            this.scene.add(chLight);
+            
+            const chestObj = {
+                mesh: chestGroup,
+                light: chLight,
+                gridX: cell.x,
+                gridY: cell.y
+            };
+            this.chests.push(chestObj);
+            this.allChests.push(chestObj);
+        }
     }
     
-    spawnPresetCollectibles(presetCrystals, presetBatteries) {
+    spawnPresetCollectibles(presetCrystals, presetBatteries, presetChests) {
         const THREE = this.THREE;
         
         // 1. Spawn Crystals
@@ -434,6 +475,43 @@ export class Maze {
             this.batteries.push(batObj);
             this.allBatteries.push(batObj);
         });
+        
+        // 3. Spawn Chests
+        presetChests.forEach(cell => {
+            const cx = (cell.gridX + 0.5) * this.cellSize;
+            const cz = (cell.gridY + 0.5) * this.cellSize;
+            const cy = 0.25;
+            
+            const chestGroup = new THREE.Group();
+            const boxGeo = new THREE.BoxGeometry(0.6, 0.45, 0.5);
+            const boxMat = new THREE.MeshStandardMaterial({ color: 0x5c4033, roughness: 0.8 });
+            const box = new THREE.Mesh(boxGeo, boxMat);
+            box.position.y = 0.225;
+            box.castShadow = true;
+            chestGroup.add(box);
+            
+            const lockGeo = new THREE.BoxGeometry(0.08, 0.12, 0.04);
+            const lockMat = new THREE.MeshStandardMaterial({ color: 0xffd700, roughness: 0.3, metalness: 0.8 });
+            const lock = new THREE.Mesh(lockGeo, lockMat);
+            lock.position.set(0, 0.225, 0.26);
+            chestGroup.add(lock);
+            
+            chestGroup.position.set(cx, 0, cz);
+            this.scene.add(chestGroup);
+            
+            const chLight = new THREE.PointLight(0xffaa00, 0.5, 3.0);
+            chLight.position.set(cx, cy + 0.5, cz);
+            this.scene.add(chLight);
+            
+            const chestObj = {
+                mesh: chestGroup,
+                light: chLight,
+                gridX: cell.gridX,
+                gridY: cell.gridY
+            };
+            this.chests.push(chestObj);
+            this.allChests.push(chestObj);
+        });
     }
     
     update(deltaTime, time) {
@@ -450,6 +528,11 @@ export class Maze {
         this.batteries.forEach(bat => {
             bat.mesh.rotation.y += deltaTime * 1.0;
             bat.light.intensity = 0.4 + Math.sin(time * 4 + bat.mesh.position.x) * 0.15;
+        });
+        
+        // 2b. Animate chests
+        this.chests.forEach(chest => {
+            chest.light.intensity = 0.5 + Math.sin(time * 5 + chest.mesh.position.x) * 0.2;
         });
         
         // 3. Flicker ceiling lights randomly
@@ -495,6 +578,14 @@ export class Maze {
             this.scene.remove(bat.light);
             bat.mesh.geometry.dispose();
             bat.mesh.material.dispose();
+        });
+        this.allChests.forEach(chest => {
+            this.scene.remove(chest.mesh);
+            this.scene.remove(chest.light);
+            chest.mesh.traverse(child => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+            });
         });
         this.flickeringLights.forEach(item => {
             this.scene.remove(item.bulb);

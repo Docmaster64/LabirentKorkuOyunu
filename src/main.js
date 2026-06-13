@@ -19,15 +19,18 @@ let roomCode = '';
 let playerName = 'Oyuncu';
 let otherPlayers = {}; // Map of socketId -> { avatarGroup, name, isDead, position, targetPos }
 let isPlayerDead = false;
+let playerColor = '#00ff66';
+let playerFaceBase64 = null;
+let flashPointLight = null;
 
 // Co-op Game Session settings
 let totalCrystalsRequired = 8;
 
 // Character Skills & Cooldowns
 const skills = {
-    flash: { cooldown: 20.0, currentCd: 0.0 },
-    dash: { cooldown: 8.0, currentCd: 0.0 },
-    invisible: { cooldown: 15.0, currentCd: 0.0 }
+    flash: { cooldown: 20.0, currentCd: 0.0, count: 0 },
+    dash: { cooldown: 8.0, currentCd: 0.0, count: -1 }, // infinite
+    invisible: { cooldown: 15.0, currentCd: 0.0, count: 0 }
 };
 let invisibilityTimer = 0.0;
 let dashTimer = 0.0;
@@ -129,6 +132,11 @@ function initEngine() {
     lightTarget = new THREE.Object3D();
     scene.add(lightTarget);
     flashlight.target = lightTarget;
+
+    // Pre-allocated Flash PointLight (non-shadow casting to avoid GPU hitching/lag during flashbangs)
+    flashPointLight = new THREE.PointLight(0xffffff, 0.0, 18.0, 1.2);
+    flashPointLight.castShadow = false;
+    scene.add(flashPointLight);
 
     // Load Labyrinth & Monster
     maze = new Maze(scene, THREE);
@@ -403,7 +411,7 @@ function setupUIBindings() {
         audioSystem.init();
         initSocket();
         
-        socket.emit('createRoom', { playerName });
+        socket.emit('createRoom', { playerName, playerColor, playerFace: playerFaceBase64 });
     });
 
     // Join Lobby Button
@@ -420,19 +428,48 @@ function setupUIBindings() {
         audioSystem.init();
         initSocket();
         
-        socket.emit('joinRoom', { roomCode: codeVal, playerName });
+        socket.emit('joinRoom', { roomCode: codeVal, playerName, playerColor, playerFace: playerFaceBase64 });
+    });
+
+    // Color Picker input listener
+    document.getElementById('player-color-picker').addEventListener('input', (e) => {
+        playerColor = e.target.value;
+    });
+
+    // Face Image File selector listener (compresses image to 128x128 to keep socket data payload tiny)
+    document.getElementById('player-face-input').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const img = new Image();
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 128;
+                    canvas.height = 128;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, 128, 128);
+                    playerFaceBase64 = canvas.toDataURL('image/png');
+                    document.getElementById('face-file-name').innerText = file.name;
+                    showNotification("Yüz Resmi Yüklendi!");
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
     });
 
     // Start Game from Lobby (Host only)
     document.getElementById('lobby-start-btn').addEventListener('click', () => {
         if (!isHost || !socket) return;
         
-        // Host generates the level grid and spawns items/batteries
+        // Host generates the level grid and spawns items/batteries/chests
         const tempMaze = new Maze(scene, THREE);
         const mazeGrid = tempMaze.grid;
         
         const crystals = tempMaze.items.map(item => ({ gridX: item.gridX, gridY: item.gridY }));
         const batteries = tempMaze.batteries.map(bat => ({ gridX: bat.gridX, gridY: bat.gridY }));
+        const chests = tempMaze.chests.map(c => ({ gridX: c.gridX, gridY: c.gridY }));
         
         tempMaze.destroy(); // destroy the temporary maze
         
@@ -440,7 +477,8 @@ function setupUIBindings() {
             roomCode,
             mazeGrid,
             items: crystals,
-            batteries
+            batteries,
+            chests
         });
     });
 
@@ -492,9 +530,10 @@ function startGame() {
     invisibilityTimer = 0.0;
     dashTimer = 0.0;
     
-    // Reset skills CD
+    // Reset skills CD and count
     for (const key in skills) {
         skills[key].currentCd = 0.0;
+        skills[key].count = key === 'dash' ? -1 : 0;
         updateSkillUI(key);
     }
     
@@ -532,9 +571,10 @@ function restartGame() {
     invisibilityTimer = 0.0;
     dashTimer = 0.0;
     
-    // Reset skills CD
+    // Reset skills CD and count
     for (const key in skills) {
         skills[key].currentCd = 0.0;
+        skills[key].count = key === 'dash' ? -1 : 0;
         updateSkillUI(key);
     }
     
@@ -1075,6 +1115,26 @@ function checkProximityInteractions() {
     if (currentLoc.distanceTo(monsterLoc) < catchDist) {
         triggerJumpscare();
     }
+    
+    // 4. Chest Pickups
+    for (let i = maze.chests.length - 1; i >= 0; i--) {
+        const chest = maze.chests[i];
+        const chestPos = new THREE.Vector3(chest.mesh.position.x, 0, chest.mesh.position.z);
+        
+        if (currentLoc.distanceTo(chestPos) < 1.35) {
+            chest.mesh.visible = false;
+            chest.light.intensity = 0.0;
+            
+            const itemIndex = maze.allChests.indexOf(chest);
+            maze.chests.splice(i, 1);
+            
+            if (isMultiplayer) {
+                socket.emit('collectItem', { roomCode, itemType: 'chest', itemIndex, playerId: socket.id });
+            } else {
+                awardRandomSkill();
+            }
+        }
+    }
 }
 
 // 10. Screen Resize
@@ -1142,7 +1202,7 @@ function initSocket() {
         }
     });
     
-    socket.on('gameStarted', ({ mazeGrid, items, batteries, players }) => {
+    socket.on('gameStarted', ({ mazeGrid, items, batteries, chests, players }) => {
         document.getElementById('lobby-screen').classList.add('hidden');
         document.getElementById('start-screen').classList.add('hidden');
         document.getElementById('hud').classList.remove('hidden');
@@ -1154,7 +1214,7 @@ function initSocket() {
         maze.destroy();
         monster.destroy();
         
-        maze = new Maze(scene, THREE, { mazeGrid, items, batteries });
+        maze = new Maze(scene, THREE, { mazeGrid, items, batteries, chests });
         monster = new Monster(scene, THREE, maze);
         
         // Reset player variables
@@ -1175,6 +1235,7 @@ function initSocket() {
         // Reset skills UI and CD
         for (const key in skills) {
             skills[key].currentCd = 0;
+            skills[key].count = key === 'dash' ? -1 : 0;
             updateSkillUI(key);
         }
         invisibilityTimer = 0;
@@ -1212,15 +1273,14 @@ function initSocket() {
             }
         });
         
-        // Update Flashlight & pitch
+        // Update Flashlight & arm pitch angle
         if (pObj.avatarGroup.userData.flashlight) {
             const isFlippedOn = player.isFlashlightOn && !pObj.isDead && player.activeSkill !== 'invisible';
             pObj.avatarGroup.userData.flashlight.visible = isFlippedOn;
             
-            const target = pObj.avatarGroup.userData.lightTarget;
-            if (target) {
-                target.position.y = 1.35 + Math.sin(player.pitch) * 5.0;
-                target.position.z = -Math.cos(player.pitch) * 5.0;
+            const handGroup = pObj.avatarGroup.userData.handGroup;
+            if (handGroup) {
+                handGroup.rotation.x = player.pitch;
             }
         }
     });
@@ -1265,6 +1325,23 @@ function initSocket() {
                 
                 audioSystem.playPickup();
                 showNotification("TAKIM ARKADAŞI PİL TOPLADI!");
+            }
+        } else if (itemType === 'chest') {
+            const chest = maze.allChests[itemIndex];
+            if (chest && chest.mesh.visible) {
+                chest.mesh.visible = false;
+                chest.light.intensity = 0.0;
+                
+                const idx = maze.chests.indexOf(chest);
+                if (idx !== -1) maze.chests.splice(idx, 1);
+                
+                audioSystem.playPickup();
+                
+                if (playerId === socket.id) {
+                    awardRandomSkill();
+                } else {
+                    showNotification("TAKIM ARKADAŞI BİR SANDIK AÇTI!");
+                }
             }
         }
     });
@@ -1350,10 +1427,8 @@ function setupOtherPlayersAvatars(players) {
         if (pid === socket.id) continue;
         
         const pData = players[pid];
-        const color = colors[idx % colors.length];
-        idx++;
         
-        const avatarGroup = createPlayerAvatar(pData.name, color);
+        const avatarGroup = createPlayerAvatar(pData.name, pData.color, pData.face);
         otherPlayers[pid] = {
             avatarGroup,
             name: pData.name,
@@ -1366,7 +1441,7 @@ function setupOtherPlayersAvatars(players) {
     updateTeamHUD();
 }
 
-function createPlayerAvatar(name, color = 0x00ff66) {
+function createPlayerAvatar(name, color = '#00ff66', faceBase64 = null) {
     const group = new THREE.Group();
     
     // Torso
@@ -1378,15 +1453,53 @@ function createPlayerAvatar(name, color = 0x00ff66) {
     torso.receiveShadow = true;
     group.add(torso);
     
-    // Head
-    const headGeo = new THREE.SphereGeometry(0.22, 12, 12);
-    const headMat = new THREE.MeshStandardMaterial({ color: 0xffdbac, roughness: 0.8 });
-    const head = new THREE.Mesh(headGeo, headMat);
+    // Custom Cube Head covered in Hoodie with face mapped on the front
+    const skinMat = new THREE.MeshStandardMaterial({ color: 0xffdbac, roughness: 0.8 });
+    const hoodieMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.6 });
+    
+    let faceMat;
+    if (faceBase64) {
+        const img = new Image();
+        img.src = faceBase64;
+        const faceTex = new THREE.Texture(img);
+        img.onload = () => {
+            faceTex.needsUpdate = true;
+        };
+        faceMat = new THREE.MeshStandardMaterial({ map: faceTex, roughness: 0.6 });
+    } else {
+        // Pixel smiley face fallback
+        const canvas = document.createElement('canvas');
+        canvas.width = 64;
+        canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffdbac';
+        ctx.fillRect(0, 0, 64, 64);
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(16, 20, 8, 8);
+        ctx.fillRect(40, 20, 8, 8);
+        ctx.fillStyle = '#ff3366';
+        ctx.fillRect(20, 42, 24, 6);
+        
+        const faceTex = new THREE.CanvasTexture(canvas);
+        faceMat = new THREE.MeshStandardMaterial({ map: faceTex, roughness: 0.6 });
+    }
+    
+    const headMaterials = [
+        hoodieMat, // Right
+        hoodieMat, // Left
+        hoodieMat, // Top
+        skinMat,   // Bottom
+        faceMat,   // Front (Face!)
+        hoodieMat  // Back
+    ];
+    
+    const headGeo = new THREE.BoxGeometry(0.36, 0.36, 0.36);
+    const head = new THREE.Mesh(headGeo, headMaterials);
     head.position.y = 1.35;
     head.castShadow = true;
     group.add(head);
     
-    // Hoodie hood
+    // Hoodie hood cover
     const hoodGeo = new THREE.SphereGeometry(0.26, 12, 12, 0, Math.PI * 2, 0, Math.PI / 1.5);
     const hoodMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.6, side: THREE.DoubleSide });
     const hood = new THREE.Mesh(hoodGeo, hoodMat);
@@ -1413,24 +1526,45 @@ function createPlayerAvatar(name, color = 0x00ff66) {
     sprite.scale.set(1.5, 0.375, 1);
     group.add(sprite);
 
-    // Flashlight SpotLight pointing down the negative Z-axis (which is the default forward direction)
+    // Right arm/flashlight group
+    const handGroup = new THREE.Group();
+    handGroup.position.set(0.35, 0.85, 0); // pivot at shoulder
+    group.add(handGroup);
+
+    // 3D Flashlight Cylinders
+    const handleGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.25, 6);
+    const handleMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.5 });
+    const handle = new THREE.Mesh(handleGeo, handleMat);
+    handle.position.set(0, -0.2, -0.2); // offset from pivot forward
+    handle.rotation.x = Math.PI / 2;
+    handGroup.add(handle);
+
+    const headGeo2 = new THREE.CylinderGeometry(0.05, 0.03, 0.08, 6);
+    const headMat2 = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.5 });
+    const fhead = new THREE.Mesh(headGeo2, headMat2);
+    fhead.position.set(0, -0.2, -0.34);
+    fhead.rotation.x = Math.PI / 2;
+    handGroup.add(fhead);
+
+    // Flashlight SpotLight pointing down the negative Z-axis (default forward direction)
     const otherFlashlight = new THREE.SpotLight(0xfff5dd, 3.0, 35.0, Math.PI / 5.2, 0.7, 1.0);
-    otherFlashlight.position.set(0, 1.35, -0.15); // head height, slightly forward
+    otherFlashlight.position.set(0, -0.2, -0.4); // tip of flashlight
     otherFlashlight.castShadow = true;
     otherFlashlight.shadow.mapSize.width = 256;
     otherFlashlight.shadow.mapSize.height = 256;
     otherFlashlight.shadow.bias = -0.002;
-    group.add(otherFlashlight);
+    handGroup.add(otherFlashlight);
     
-    // Spotlight Target (relative to avatar group)
+    // Spotlight Target (relative to handGroup)
     const otherLightTarget = new THREE.Object3D();
-    otherLightTarget.position.set(0, 1.35, -5.0); // 5 units forward
-    group.add(otherLightTarget);
+    otherLightTarget.position.set(0, -0.2, -5.0); // 5 units forward
+    handGroup.add(otherLightTarget);
     otherFlashlight.target = otherLightTarget;
 
     group.userData = {
         flashlight: otherFlashlight,
-        lightTarget: otherLightTarget
+        lightTarget: otherLightTarget,
+        handGroup: handGroup
     };
     
     scene.add(group);
@@ -1442,26 +1576,33 @@ function triggerSkill(skillName) {
     const skill = skills[skillName];
     if (!skill || skill.currentCd > 0 || isPlayerDead || gameState !== 'play') return;
     
+    if (skill.count === 0) {
+        showNotification("YETENEK KİLİTLİ! SANDIKLARDAN BULMALISIN.");
+        return;
+    }
+    
+    if (skill.count > 0) {
+        skill.count--;
+    }
+    
     skill.currentCd = skill.cooldown;
     updateSkillUI(skillName);
     
     if (skillName === 'flash') {
         audioSystem.playFlashlightClick();
         
-        // 3D PointLight flash effect in the maze scene
-        const flashLight = new THREE.PointLight(0xffffff, 8.0, 18.0, 1.2);
-        flashLight.position.copy(camera.position);
-        scene.add(flashLight);
+        // Reusable PointLight flash (no shader stalls or re-allocs)
+        flashPointLight.position.copy(camera.position);
+        flashPointLight.intensity = 8.0;
         
-        // Smoothly fade out the 3D PointLight
         let flashIntensity = 8.0;
         const interval = setInterval(() => {
             flashIntensity -= 0.8;
             if (flashIntensity <= 0) {
-                scene.remove(flashLight);
+                flashPointLight.intensity = 0.0;
                 clearInterval(interval);
             } else {
-                flashLight.intensity = flashIntensity;
+                flashPointLight.intensity = flashIntensity;
             }
         }, 40);
         
@@ -1487,7 +1628,7 @@ function triggerSkill(skillName) {
         const dist = camera.position.distanceTo(monster.position);
         if (dist < 6.5) {
             monster.stunTimer = 3.5;
-            showNotification("YARATIK KÖRLENDİ! (3.5 Sn)");
+            showNotification("PANDİK CANAVARI KÖRLENDİ! (3.5 Sn)");
         } else {
             showNotification("IŞIK BOMBASI KULLANILDI!");
         }
@@ -1536,25 +1677,56 @@ function updateSkillUI(skillName) {
     const overlay = document.getElementById(overlayId);
     const mobBtn = document.getElementById(mobBtnId);
     
+    // Update count badge
+    const countBadge = document.getElementById(`count-${skillName}`);
+    if (countBadge) {
+        countBadge.innerText = skill.count === -1 ? '∞' : skill.count;
+    }
+    
+    if (skill.count === 0) {
+        slot.classList.add('locked');
+    } else {
+        slot.classList.remove('locked');
+    }
+    
     if (skill.currentCd > 0) {
         const ratio = (skill.currentCd / skill.cooldown) * 100;
         overlay.style.transform = `translateY(${100 - ratio}%)`;
         slot.classList.remove('ready');
-        if (mobBtn) mobBtn.classList.add('cooldown');
+        if (mobBtn) {
+            mobBtn.classList.add('cooldown');
+        }
     } else {
         overlay.style.transform = `translateY(100%)`;
-        slot.classList.add('ready');
-        if (mobBtn) mobBtn.classList.remove('cooldown');
+        if (skill.count !== 0) {
+            slot.classList.add('ready');
+            if (mobBtn) mobBtn.classList.remove('cooldown');
+        } else {
+            slot.classList.remove('ready');
+            if (mobBtn) mobBtn.classList.add('cooldown');
+        }
+    }
+    
+    // Update mobile button texts dynamically with charges/lock status
+    if (mobBtn) {
+        if (skill.count === 0) {
+            mobBtn.innerText = skillName === 'flash' ? '💥 Kilitli' : '👤 Kilitli';
+        } else {
+            mobBtn.innerText = skillName === 'flash' 
+                ? `💥 Flash (${skill.count})` 
+                : (skillName === 'invisible' ? `👤 Gizlen (${skill.count})` : '🏃 Koş');
+        }
     }
 }
 
 // Play effects of skills triggered by other players
 function triggerRemoteSkillEffect(skillName, position, forwardDir) {
     if (skillName === 'flash') {
-        const light = new THREE.PointLight(0xffffff, 2.0, 15.0);
-        light.position.copy(position);
-        scene.add(light);
-        setTimeout(() => scene.remove(light), 150);
+        flashPointLight.position.copy(position);
+        flashPointLight.intensity = 6.0;
+        setTimeout(() => {
+            flashPointLight.intensity = 0.0;
+        }, 150);
         
         showNotification("BİRİ IŞIK BOMBASI PATLATTI!");
     } else if (skillName === 'dash') {
@@ -1562,6 +1734,19 @@ function triggerRemoteSkillEffect(skillName, position, forwardDir) {
     } else if (skillName === 'invisible') {
         showNotification("BİR OYUNCU GÖRÜNMEZ OLDU!");
     }
+}
+
+// Award random skill when looting a chest
+function awardRandomSkill() {
+    audioSystem.playPickup();
+    const rand = Math.random() > 0.5 ? 'flash' : 'invisible';
+    skills[rand].count++;
+    
+    const skillNameTr = rand === 'flash' ? 'Işık Bombası' : 'Görünmezlik';
+    const skillIcon = rand === 'flash' ? '💥' : '👤';
+    showNotification(`${skillIcon} +1 ${skillNameTr} Yeteneği Kazanıldı!`);
+    
+    updateSkillUI(rand);
 }
 
 // Team Defeat trigger Game Over UI

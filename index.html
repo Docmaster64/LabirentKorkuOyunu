@@ -100,19 +100,19 @@
         <!-- Player Skills HUD -->
         <div id="skills-card" class="hud-card">
             <div class="skills-container">
-                <div class="skill-slot" id="skill-flash">
+                <div class="skill-slot locked" id="skill-flash">
                     <span class="key-hint">Q</span>
-                    <span class="icon">💥</span> Flash
+                    <span class="icon">💥</span> Flash <span class="skill-count" id="count-flash">0</span>
                     <div class="cooldown-overlay" id="cooldown-flash"></div>
                 </div>
                 <div class="skill-slot" id="skill-dash">
                     <span class="key-hint">E</span>
-                    <span class="icon">⚡</span> Dash
+                    <span class="icon">⚡</span> Dash <span class="skill-count" id="count-dash">∞</span>
                     <div class="cooldown-overlay" id="cooldown-dash"></div>
                 </div>
-                <div class="skill-slot" id="skill-invisible">
+                <div class="skill-slot locked" id="skill-invisible">
                     <span class="key-hint">R</span>
-                    <span class="icon">👤</span> Gizlen
+                    <span class="icon">👤</span> Gizlen <span class="skill-count" id="count-invisible">0</span>
                     <div class="cooldown-overlay" id="cooldown-invisible"></div>
                 </div>
             </div>
@@ -158,8 +158,23 @@
             
             <div class="warning-sound">🔊 Lütfen Kulaklık Takın (3D Ses Sentezi Aktif)</div>
             
-            <div class="player-name-section" style="margin-bottom: 20px;">
+            <div class="player-name-section" style="margin-bottom: 12px;">
                 <input type="text" id="player-name-input" placeholder="Adını Yaz..." maxlength="12" style="padding: 10px; background: rgba(0,0,0,0.6); color: #fff; border: 1px solid #ff0033; font-family: 'Outfit', sans-serif; font-size: 16px; border-radius: 4px; text-align: center; width: 200px;">
+            </div>
+            
+            <div class="customization-section" style="margin-bottom: 20px; display: flex; flex-direction: column; gap: 10px; align-items: center; background: rgba(0,0,0,0.5); padding: 12px; border-radius: 8px; border: 1px solid rgba(255, 0, 51, 0.25); width: 260px; margin: 0 auto 20px;">
+                <h4 style="margin: 0; font-size: 12px; color: #ff0033; letter-spacing: 1px; text-transform: uppercase;">Karakter Özelleştir</h4>
+                <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                    <span style="font-size: 13px; color: #ccc;">Sırt Rengi:</span>
+                    <input type="color" id="player-color-picker" value="#00ff66" style="border: none; background: transparent; width: 45px; height: 26px; cursor: pointer; padding: 0;">
+                </div>
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 3px; width: 100%;">
+                    <label for="player-face-input" id="face-label" style="cursor: pointer; border: 1px solid #ff0033; padding: 6px 10px; border-radius: 4px; background: rgba(255, 0, 51, 0.12); font-size: 12px; text-align: center; width: 100%; display: inline-block; font-weight: 600;">
+                        👤 YÜZ RESMİ (PNG/JPG)
+                    </label>
+                    <input type="file" id="player-face-input" accept="image/png, image/jpeg" style="display: none;">
+                    <span id="face-file-name" style="color: #888; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; max-width: 200px;">(Piksel Surat Aktif)</span>
+                </div>
             </div>
             
             <div class="menu-actions" style="display: flex; flex-direction: column; gap: 12px; align-items: center;">
@@ -205,7 +220,7 @@
     <div id="game-over-screen" class="hidden">
         <div class="menu-container glassmorphism red-alert">
             <h2 class="result-title blood-text">YAKALANDIN!</h2>
-            <p class="result-desc">Yeşil kapüşonlu arkadaşının gölgesinden kaçamadın...</p>
+            <p class="result-desc">Pandik Canavarı'nın gölgesinden kaçamadın...</p>
             
             <div class="score-card">
                 <div class="score-row">

@@ -22,7 +22,7 @@ io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
     
     // 1. Create a Room
-    socket.on('createRoom', ({ playerName }) => {
+    socket.on('createRoom', ({ playerName, playerColor, playerFace }) => {
         const roomCode = Math.floor(1000 + Math.random() * 9000).toString();
         
         rooms[roomCode] = {
@@ -45,7 +45,9 @@ io.on('connection', (socket) => {
             isMoving: false,
             isDead: false,
             activeSkill: null,
-            isFlashlightOn: true
+            isFlashlightOn: true,
+            color: playerColor || '#00ff66',
+            face: playerFace || null
         };
         
         socket.join(roomCode);
@@ -54,7 +56,7 @@ io.on('connection', (socket) => {
     });
     
     // 2. Join an existing Room
-    socket.on('joinRoom', ({ roomCode, playerName }) => {
+    socket.on('joinRoom', ({ roomCode, playerName, playerColor, playerFace }) => {
         const code = roomCode.trim();
         const room = rooms[code];
         
@@ -85,7 +87,9 @@ io.on('connection', (socket) => {
             isMoving: false,
             isDead: false,
             activeSkill: null,
-            isFlashlightOn: true
+            isFlashlightOn: true,
+            color: playerColor || '#00ff66',
+            face: playerFace || null
         };
         
         socket.join(code);
@@ -95,12 +99,12 @@ io.on('connection', (socket) => {
     });
     
     // 3. Host Starts Game
-    socket.on('startGame', ({ roomCode, mazeGrid, items, batteries }) => {
+    socket.on('startGame', ({ roomCode, mazeGrid, items, batteries, chests }) => {
         const room = rooms[roomCode];
         if (!room || room.hostId !== socket.id) return;
         
         room.gameStarted = true;
-        room.mazeData = { mazeGrid, items, batteries };
+        room.mazeData = { mazeGrid, items, batteries, chests };
         room.itemsCollected = 0;
         
         // Reset player dead states
@@ -112,6 +116,7 @@ io.on('connection', (socket) => {
             mazeGrid,
             items,
             batteries,
+            chests,
             players: room.players
         });
         console.log(`Game started in room ${roomCode}`);

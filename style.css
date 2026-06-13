@@ -840,3 +840,22 @@ body, html {
     opacity: 0.5;
 }
 
+/* Custom styling for locked skill slots and charges badge */
+.skill-slot.locked {
+    opacity: 0.4;
+    filter: grayscale(100%);
+    pointer-events: none;
+}
+.skill-slot .skill-count {
+    background: #ff0033;
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 800;
+    padding: 0px 5px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    min-width: 16px;
+    text-align: center;
+}
+
+
