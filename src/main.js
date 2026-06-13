@@ -2125,6 +2125,27 @@ let uploadedImage = null;
 let faceScale = 100;
 let faceOffsetX = 0;
 let faceOffsetY = 0;
+let paintMode = 'draw'; // 'draw' or 'move'
+let isDraggingImage = false;
+let dragStartMousePos = { x: 0, y: 0 };
+let dragStartOffsets = { x: 0, y: 0 };
+
+function setPaintMode(mode) {
+    paintMode = mode;
+    const btn = document.getElementById('toggle-paint-mode-btn');
+    if (!btn) return;
+    if (mode === 'move') {
+        btn.innerText = "🖐️ Taşıma Modu";
+        btn.style.background = "#7c0010";
+        btn.style.borderColor = "#ff0033";
+        if (paintCanvas) paintCanvas.style.cursor = 'move';
+    } else {
+        btn.innerText = "✏️ Çizim Modu";
+        btn.style.background = "#222";
+        btn.style.borderColor = "#444";
+        if (paintCanvas) paintCanvas.style.cursor = 'crosshair';
+    }
+}
 
 function setupPaintEditor() {
     paintCanvas = document.getElementById('paint-canvas');
@@ -2132,31 +2153,143 @@ function setupPaintEditor() {
     paintCtx = paintCanvas.getContext('2d');
     
     resetPaintCanvas();
+    setPaintMode('draw');
     
-    paintCanvas.addEventListener('mousedown', (e) => { isDrawingPaint = true; drawOnPaintCanvas(e); });
-    paintCanvas.addEventListener('mousemove', (e) => { if (isDrawingPaint) drawOnPaintCanvas(e); });
-    paintCanvas.addEventListener('mouseup', () => isDrawingPaint = false);
-    paintCanvas.addEventListener('mouseleave', () => isDrawingPaint = false);
+    paintCanvas.addEventListener('mousedown', (e) => {
+        if (paintMode === 'move') {
+            isDraggingImage = true;
+            dragStartMousePos.x = e.clientX;
+            dragStartMousePos.y = e.clientY;
+            dragStartOffsets.x = faceOffsetX;
+            dragStartOffsets.y = faceOffsetY;
+        } else {
+            isDrawingPaint = true;
+            drawOnPaintCanvas(e);
+        }
+    });
     
-    paintCanvas.addEventListener('touchstart', (e) => { e.preventDefault(); isDrawingPaint = true; drawOnPaintCanvas(e.touches[0]); }, { passive: false });
-    paintCanvas.addEventListener('touchmove', (e) => { e.preventDefault(); if (isDrawingPaint) drawOnPaintCanvas(e.touches[0]); }, { passive: false });
-    paintCanvas.addEventListener('touchend', () => isDrawingPaint = false);
+    paintCanvas.addEventListener('mousemove', (e) => {
+        if (paintMode === 'move') {
+            if (isDraggingImage) {
+                const dx = e.clientX - dragStartMousePos.x;
+                const dy = e.clientY - dragStartMousePos.y;
+                const rect = paintCanvas.getBoundingClientRect();
+                const scaleX = 128.0 / rect.width;
+                const scaleY = 128.0 / rect.height;
+                
+                faceOffsetX = dragStartOffsets.x + (dx * scaleX);
+                faceOffsetY = dragStartOffsets.y + (dy * scaleY);
+                
+                faceOffsetX = Math.max(-128, Math.min(128, faceOffsetX));
+                faceOffsetY = Math.max(-128, Math.min(128, faceOffsetY));
+                
+                document.getElementById('face-offset-x-slider').value = faceOffsetX;
+                document.getElementById('face-offset-y-slider').value = faceOffsetY;
+                redrawPaintCanvas();
+            }
+        } else {
+            if (isDrawingPaint) drawOnPaintCanvas(e);
+        }
+    });
+    
+    paintCanvas.addEventListener('mouseup', () => {
+        isDrawingPaint = false;
+        isDraggingImage = false;
+    });
+    
+    paintCanvas.addEventListener('mouseleave', () => {
+        isDrawingPaint = false;
+        isDraggingImage = false;
+    });
+    
+    paintCanvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        if (paintMode === 'move') {
+            isDraggingImage = true;
+            dragStartMousePos.x = touch.clientX;
+            dragStartMousePos.y = touch.clientY;
+            dragStartOffsets.x = faceOffsetX;
+            dragStartOffsets.y = faceOffsetY;
+        } else {
+            isDrawingPaint = true;
+            drawOnPaintCanvas(touch);
+        }
+    }, { passive: false });
+    
+    paintCanvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        if (paintMode === 'move') {
+            if (isDraggingImage) {
+                const dx = touch.clientX - dragStartMousePos.x;
+                const dy = touch.clientY - dragStartMousePos.y;
+                const rect = paintCanvas.getBoundingClientRect();
+                const scaleX = 128.0 / rect.width;
+                const scaleY = 128.0 / rect.height;
+                
+                faceOffsetX = dragStartOffsets.x + (dx * scaleX);
+                faceOffsetY = dragStartOffsets.y + (dy * scaleY);
+                
+                faceOffsetX = Math.max(-128, Math.min(128, faceOffsetX));
+                faceOffsetY = Math.max(-128, Math.min(128, faceOffsetY));
+                
+                document.getElementById('face-offset-x-slider').value = faceOffsetX;
+                document.getElementById('face-offset-y-slider').value = faceOffsetY;
+                redrawPaintCanvas();
+            }
+        } else {
+            if (isDrawingPaint) drawOnPaintCanvas(touch);
+        }
+    }, { passive: false });
+    
+    paintCanvas.addEventListener('touchend', () => {
+        isDrawingPaint = false;
+        isDraggingImage = false;
+    });
+
+    // Mouse wheel zoom on paint canvas
+    paintCanvas.addEventListener('wheel', (e) => {
+        if (uploadedImage) {
+            e.preventDefault();
+            faceScale -= Math.sign(e.deltaY) * 8;
+            faceScale = Math.max(30, Math.min(300, faceScale));
+            
+            document.getElementById('face-scale-slider').value = faceScale;
+            redrawPaintCanvas();
+        }
+    }, { passive: false });
+
+    // Toggle Mode Button listener
+    const toggleModeBtn = document.getElementById('toggle-paint-mode-btn');
+    if (toggleModeBtn) {
+        toggleModeBtn.addEventListener('click', () => {
+            if (paintMode === 'draw') {
+                setPaintMode('move');
+            } else {
+                setPaintMode('draw');
+            }
+        });
+    }
 
     document.querySelectorAll('.brush-color').forEach(el => {
         el.addEventListener('click', (e) => {
             document.querySelectorAll('.brush-color').forEach(b => b.classList.remove('active'));
             e.target.classList.add('active');
             brushColor = e.target.dataset.color;
+            setPaintMode('draw'); // auto-switch to draw when picking color
         });
     });
     
     document.getElementById('brush-size-slider').addEventListener('input', (e) => {
         brushSize = parseInt(e.target.value);
+        setPaintMode('draw'); // auto-switch to draw when adjusting brush
     });
     
     document.getElementById('clear-canvas-btn').addEventListener('click', () => {
         uploadedImage = null;
         resetPaintCanvas();
+        setPaintMode('draw');
     });
     
     document.getElementById('face-scale-slider').addEventListener('input', (e) => {
@@ -2183,6 +2316,7 @@ function setupPaintEditor() {
                     uploadedImage = new Image();
                     uploadedImage.onload = () => {
                         redrawPaintCanvas();
+                        setPaintMode('move'); // auto-switch to move/align mode on load!
                     };
                     uploadedImage.src = event.target.result;
                 };
